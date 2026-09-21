@@ -9,7 +9,6 @@ class ImageAnalyzer:
     bem como determinar o status de brilho e ruído com base em limites definidos.
     """
 
-
     def __init__(self, image):
         self.image = image2matrix(image)
 
@@ -48,7 +47,6 @@ class Filter:
     Classe para aplicar filtros em imagens, incluindo suavização, nitidez, 
     ajuste de brilho e contraste.
     """
-
 
     def __init__(self, image):
         self.image = image2matrix(image)

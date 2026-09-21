@@ -1,8 +1,10 @@
-import torch
-import torch.nn as nn
+from torch import nn
 
 
 class MeterNetwork(nn.Module):
+    """
+    Modelo de Rede Neural para identificar medidores em imagens
+    """
 
     def __init__(self):
         super().__init__()
@@ -30,7 +32,7 @@ class MeterNetwork(nn.Module):
 
         self.head = nn.Conv2d(
             256,
-            5,
+            5, # x, y, altura e largura
             kernel_size=1
         )
 
