@@ -1,0 +1,15 @@
+{
+  "checkpoint": "models/checkpoints/meter_detector.pt",
+  "input": "data/imgs_preprocessed_test",
+  "output": "data/imgs_prediction_test",
+  "threshold": 0.3,
+  "training": {
+    "epochs": 25,
+    "batch_size": 8,
+    "learning_rate": 0.0001,
+    "validation_ratio": 0.2,
+    "seed": 42,
+    "num_workers": 0,
+    "resume": false
+  }
+}
