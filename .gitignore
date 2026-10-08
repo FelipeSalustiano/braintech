@@ -11,3 +11,10 @@ data/preprocessed_images/
 data/annotations/
 data/sheets/
 data/annotations
+
+# Lab 02: fotos do cliente nunca no repositorio
+lab-02/fotos/
+lab-02/saidas/
+data/imgs_raw_test/
+*.jpg
+*.jpeg
