@@ -2,3 +2,12 @@
 __pycache__/
 *pyc
 .git/objects/
+logs/
+data/imgs_prediction_test/
+data/imgs_preprocessed_test/
+data/predictions_preprocessed/
+data/raw_images/
+data/preprocessed_images/
+data/annotations/
+data/sheets/
+data/annotations

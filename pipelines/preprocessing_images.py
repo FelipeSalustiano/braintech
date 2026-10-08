@@ -1,56 +1,62 @@
+import argparse
 import os
+import sys
+from pathlib import Path
+
 import cv2
-from src.image_preprocessing import ImageAnalyzer, Filter
 
-pasta_entrada = "data/raw_images/PSP_EXTRATLEITIMPL_220526_0408"
-sufixo_saida = "_preprocessed"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-# Pasta de saída: mesmo nome + "_preprocessed"
-nome_pasta = os.path.basename(pasta_entrada)
-pasta_saida = os.path.join(
-    "data",
-    "preprocessed_images",
-    nome_pasta + sufixo_saida
-)
+from src.image_preprocessing import Filter, ImageAnalyzer
 
-os.makedirs(pasta_saida, exist_ok=True)
+def parse_args():
+    parser = argparse.ArgumentParser(description="Preprocess meter images.")
+    parser.add_argument("--input", required=True, help="Input image directory")
+    parser.add_argument("--output", required=True, help="Output image directory")
+    return parser.parse_args()
 
-for nome_arquivo in os.listdir(pasta_entrada):
+def main():
+    args = parse_args()
+    os.makedirs(args.output, exist_ok=True)
 
-    # Só processa jpg/jpeg
-    if not nome_arquivo.lower().endswith((".jpg", ".jpeg")):
-        continue
+    processed = 0
+    errors = 0
+    for filename in sorted(os.listdir(args.input)):
+        if not filename.lower().endswith((".jpg", ".jpeg")):
+            continue
 
-    caminho = os.path.join(pasta_entrada, nome_arquivo)
+        input_path = os.path.join(args.input, filename)
 
-    try:
-        with open(caminho, "rb") as arquivo:
+        try:
+            with open(input_path, "rb") as image_file:
+                analyzer = ImageAnalyzer(image_file)
+                brightness = analyzer.brightness_status()
+                noise = analyzer.noise_status()
 
-            # Analisa a imagem
-            analisador = ImageAnalyzer(arquivo)
-            brilho = analisador.brightness_status()
-            ruido = analisador.noise_status()
+                image_file.seek(0)
+                filter_ = Filter(image_file)
 
-            # Volta o cursor do arquivo para o início antes de ler de novo
-            arquivo.seek(0)
-            filtro = Filter(arquivo)
+            if brightness == "escura":
+                filter_.increase_brightness()
+            elif brightness == "clara":
+                filter_.decrease_brightness()
 
-        # Aplica os filtros conforme o diagnóstico
-        if brilho == "escura":
-            filtro.increase_brightness()
-        elif brilho == "clara":
-            filtro.decrease_brightness()
+            if noise == "borrada":
+                filter_.sharpen()
+            elif noise == "ruidosa":
+                filter_.suavization()
 
-        if ruido == "borrada":
-            filtro.sharpen()
-        elif ruido == "ruidosa":
-            filtro.suavization()
+            output_path = os.path.join(args.output, filename)
+            if not cv2.imwrite(output_path, filter_.image):
+                raise RuntimeError(f"could not write {output_path}")
+            processed += 1
+        except Exception as error:
+            errors += 1
+            print(f"Erro em {filename}: {error}")
 
-        # Salva a imagem tratada
-        cv2.imwrite(os.path.join(pasta_saida, nome_arquivo), filtro.image)
-        print(f"{nome_arquivo}: brilho={brilho}, ruido={ruido}")
+    print(f"Preprocessamento concluído: {processed} imagens processadas, {errors} erros.")
 
-    except Exception as e:
-        print(f"Erro em {nome_arquivo}: {e}")
-
-print("Preprocessamento de imagens realizado.")
+if __name__ == "__main__":
+    main()
