@@ -11,5 +11,27 @@
     "seed": 42,
     "num_workers": 0,
     "resume": false
+  },
+  "semi_supervised": {
+    "annotations": "data/annotations/PSP_EXTRATLEITIMPL_030726_0121_instances.json",
+    "labeled_images": "data/preprocessed_images/PSP_EXTRATLEITIMPL_030726_0121_preprocessed",
+    "unlabeled_images": [
+      "data/preprocessed_images/PSP_EXTRATLEITIMPL_200526_0352_preprocessed",
+      "data/preprocessed_images/PSP_EXTRATLEITIMPL_210526_0335_preprocessed",
+      "data/preprocessed_images/PSP_EXTRATLEITIMPL_220526_0408_preprocessed"
+    ],
+    "output_dir": "models/checkpoints/semi_supervised",
+    "pseudo_labels_dir": "data/annotations/pseudo",
+    "rounds": 2,
+    "teacher_epochs": 15,
+    "student_epochs": 12,
+    "batch_size": 8,
+    "learning_rate": 0.01,
+    "accept_threshold": 0.8,
+    "negative_threshold": 0.05,
+    "labeled_fraction": 0.5,
+    "validation_ratio": 0.2,
+    "seed": 42,
+    "num_workers": 4
   }
 }

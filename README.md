@@ -95,7 +95,11 @@ braintech/
 ├── documents/
 ├── models/
 │   ├── checkpoints/
+│   │   ├── meter_detector.pt
+│   │   └── semi_supervised/
+│   │       └── best.pt        (baixar do Drive, ver "Baixar o modelo treinado")
 │   ├── dataset.py
+│   ├── detector.py
 │   └── model.py
 ├── notebooks/
 │   ├── arquitetura.ipynb
@@ -360,6 +364,105 @@ Também é possível fazer um override temporário:
 
 ```bash
 python pipelines/predict_detector.py --threshold 0.5
+```
+
+## Rotulagem semi-supervisionada
+
+Só o lote `PSP_EXTRATLEITIMPL_030726_0121` (2.992 imagens) tem anotação COCO; os outros três lotes (9.348 imagens) não. Para rotulá-los, o projeto usa um esquema professor-aluno com pseudo-rótulos (self-training / Noisy Student) sobre um Faster R-CNN ResNet50-FPN v2 pré-treinado no COCO.
+
+```text
+Rótulos humanos (treino) ──> Professor (rodada 0)
+                                  │  prediz com TTA (original + espelhada)
+                                  v
+              Imagens sem rótulo ──> aceito | negativo | revisar
+                                  │
+Rótulos humanos + pseudo-rótulos ─┴─> Aluno novo (augmentação forte)
+                                  │  só vira professor se melhorar na validação
+                                  v
+                       Próxima rodada ... ──> best.pt
+```
+
+Decisões principais:
+
+- **Imagens sem caixa no JSON são negativas.** As 225 imagens do lote rotulado sem anotação mostram fachadas, portas ou medidores ilegíveis; entram no treino como fundo para o modelo aprender a não rotular.
+- **Validação sempre humana.** A validação usa as mesmas 553 imagens com caixa do `train_detector.py` (mesma ordem, seed e proporção) mais 20% das negativas. Ela nunca recebe pseudo-rótulos e decide se o aluno substitui o professor.
+- **Filtro de confiança.** Na predição com TTA, caixas vistas nas duas visões têm score médio; caixas vistas em só uma têm o score pela metade. A imagem vira:
+  - `aceito`: todas as caixas com score `>= accept_threshold` (0,8). Entra no treino do aluno;
+  - `negativo`: nenhuma caixa acima de `negative_threshold` (0,05). Entra como fundo;
+  - `revisar`: alguma caixa na zona de incerteza. Fica fora do treino e vai para revisão humana.
+- **Caixas aninhadas.** O modelo às vezes propõe o medidor e o gabinete que o contém. Caixas com 80% ou mais da área dentro de outra de score maior são descartadas.
+- **Mistura 50/50.** Cada lote do aluno tem, em média, metade de rótulos humanos e metade de pseudo-rótulos, para os pseudo-rótulos não dominarem o treino.
+
+Os parâmetros ficam na seção `semi_supervised` do [configs/detector.json](configs/detector.json).
+
+### Baixar o modelo treinado
+
+O checkpoint do modelo final (`best.pt`, ~173 MB) não fica no git, porque passa do limite de 100 MB por arquivo do GitHub. Ele está no Google Drive:
+
+**Link:**  _[best.pt](https://drive.google.com/file/d/1yEUIxBpmWoSwnLl4IkQONiIlRFzAODCV/view?usp=drive_link)_
+
+Depois de baixar, coloque o arquivo exatamente neste caminho, a partir da raiz do projeto:
+
+```text
+braintech/
+└── models/
+    └── checkpoints/
+        └── semi_supervised/
+            └── best.pt
+```
+
+Se a pasta `semi_supervised/` não existir, crie-a. O nome do arquivo precisa ser `best.pt`: é o caminho que o `pipelines/pseudo_label.py` usa por padrão (`output_dir` do `configs/detector.json` + `/best.pt`). Para usar o arquivo em outro lugar, passe `--checkpoint <caminho>`.
+
+Confira se o arquivo foi baixado inteiro e carrega:
+
+```bash
+python -c "import torch; c = torch.load('models/checkpoints/semi_supervised/best.pt', map_location='cpu', weights_only=True); print(c['architecture'], 'época', c['epoch'], c['metrics'])"
+```
+
+A saída deve mostrar `fasterrcnn_resnet50_fpn_v2 época 11` e as métricas de validação do modelo, com `'ap50_95': 0.6206...`. Esse valor é medido sem TTA; com TTA, que é como o modelo rotula, o AP50:95 é 0,625 (ver `summary.json`). Com o arquivo no lugar, não é preciso treinar: vá direto para "Rotular as imagens restantes" ou "Testar em imagens específicas".
+
+Os checkpoints de cada rodada (`round_0.pt`, `round_1.pt`, `round_2.pt`) são intermediários e não precisam ser baixados. O `round_2.pt` é idêntico ao `best.pt`.
+
+### Treinar
+
+```bash
+python pipelines/train_semi_supervised.py
+```
+
+Saídas em `models/checkpoints/semi_supervised/`: `round_N.pt` de cada rodada, `best.pt` (melhor rodada) e `summary.json` com as métricas de validação e a contagem de pseudo-rótulos. O log fica em `logs/semi_supervised.log`. Para um teste rápido:
+
+```bash
+python pipelines/train_semi_supervised.py --rounds 1 --teacher-epochs 1 --student-epochs 1 --unlabeled-limit 200
+```
+
+### Rotular as imagens restantes
+
+```bash
+python pipelines/pseudo_label.py --preview-dir data/predictions_preprocessed/pseudo
+```
+
+Para cada lote são gerados, em `data/annotations/pseudo/`:
+
+- `<lote>_instances.json`: COCO no formato do CVAT, pronto para importar. Cada anotação traz `score` e `pseudo_label_status`. Imagens `revisar` trazem as caixas incertas para correção manual;
+- `<lote>_status.csv`: status, maior score e número de caixas de cada imagem, para filtrar o que precisa de revisão.
+
+Com `--preview-dir`, as imagens são salvas com as caixas desenhadas, separadas por status. Para ser mais ou menos rigoroso sem retreinar, use `--accept-threshold`.
+
+### Testar em imagens específicas
+
+Para rodar o modelo numa pasta qualquer (por exemplo, fotos novas em `data/imgs_raw_test`), pré-processe as imagens primeiro, porque o modelo foi treinado com imagens pré-processadas:
+
+```bash
+python pipelines/preprocessing_images.py --input data/imgs_raw_test --output data/imgs_preprocessed_test
+python pipelines/pseudo_label.py --folders data/imgs_preprocessed_test --output data/imgs_test_predictions --preview-dir data/imgs_test_predictions
+```
+
+O pré-processamento só lê arquivos `.jpg` e `.jpeg`. Não é preciso redimensionar: o modelo ajusta o tamanho sozinho e as caixas saem nas coordenadas da imagem original.
+
+Para comparar com o detector antigo nas mesmas imagens:
+
+```bash
+python pipelines/predict_detector.py --checkpoint models/checkpoints/meter_detector.pt --input data/imgs_preprocessed_test --output data/imgs_test_predictions/modelo_antigo
 ```
 
 ## Verificação rápida
