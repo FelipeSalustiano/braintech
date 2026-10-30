@@ -10,6 +10,7 @@ data/predictions_preprocessed/
 data/raw_images/
 data/preprocessed_images/
 data/sheets/
+data/crops*/
 data/annotations
 
 # Lab 02: fotos do cliente nunca no repositorio

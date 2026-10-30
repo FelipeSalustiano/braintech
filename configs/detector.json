@@ -3,6 +3,16 @@
   "input": "data/imgs_preprocessed_test",
   "output": "data/imgs_prediction_test",
   "threshold": 0.3,
+  "cropping": {
+    "checkpoint": "models/checkpoints/semi_supervised/best.pt",
+    "input": "data/imgs_preprocessed_test",
+    "output": "data/crops",
+    "crop_source": null,
+    "threshold": 0.8,
+    "margin": 0.1,
+    "min_size": 32,
+    "max_outside_ratio": 0.15
+  },
   "training": {
     "epochs": 25,
     "batch_size": 8,
