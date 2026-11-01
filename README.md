@@ -475,6 +475,15 @@ fotos pré-processadas --crop_detector.py (detector de display)--> data/display_
                       --evaluate_ocr.py-----------------------> evaluation.csv               (compara com os CSVs)
 ```
 
+### Modelos treinados
+
+- **Reconhecedor** (`models/checkpoints/recognizer/best.pt`, ~25 MB): está no git.
+- **Detector de display** (`models/checkpoints/display/best.pt`, ~166 MB): não fica no git, porque passa do limite de 100 MB por arquivo do GitHub. Peça o arquivo a quem treinou e coloque-o em `models/checkpoints/display/best.pt`. Os `round_N.pt` da mesma pasta são intermediários e não precisam ser copiados.
+
+Sem o detector de display dá para treinar o reconhecedor e rodar o `read_meter.py` em recortes já existentes, mas não dá para gerar recortes de fotos novas.
+
+Os CSVs que o `train_recognizer.py` grava junto do checkpoint (`split.csv`, `test_predictions.csv`, `label_scores.csv`) também ficam fora do git, porque trazem leituras e códigos de instalação das planilhas do cliente. Eles são gerados de novo a cada treino.
+
 ### Treinar
 
 1. **Detector de display**: anote a classe `display` no CVAT e exporte em COCO para `data/annotations/instances_default.json`. O treino é o mesmo semi-supervisionado do medidor, com outra seção do config. `max_image_id` diz até qual imagem a tarefa foi anotada, porque as imagens seguintes virariam negativas.
