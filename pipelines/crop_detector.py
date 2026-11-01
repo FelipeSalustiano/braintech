@@ -109,6 +109,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--crop-source", type=Path, help="Folder with the images to crop (same file names as input)")
     parser.add_argument("--threshold", type=float)
     parser.add_argument("--margin", type=float)
+    parser.add_argument("--min-size", type=int, help="Menor lado aceito do recorte, em pixels (displays são pequenos)")
     parser.add_argument("--no-tta", action="store_true", help="Disable the horizontal-flip test-time augmentation")
     return parser.parse_args()
 
@@ -130,7 +131,7 @@ def main() -> None:
     settings = {
         "threshold": args.threshold if args.threshold is not None else cropping.get("threshold", 0.8),
         "margin": args.margin if args.margin is not None else cropping.get("margin", 0.10),
-        "min_size": cropping.get("min_size", 32),
+        "min_size": args.min_size if args.min_size is not None else cropping.get("min_size", 32),
         "max_outside_ratio": cropping.get("max_outside_ratio", 0.15),
     }
 

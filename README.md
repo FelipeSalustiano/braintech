@@ -26,7 +26,7 @@ Imagens COCO anotadas + JSON de anotações
        Imagens com bounding box desenhada
 ```
 
-O projeto detecta a região do medidor. Ele não faz OCR nem extrai automaticamente os números exibidos no medidor.
+O projeto detecta o medidor e o display e lê o valor do display com um reconhecedor treinado (veja [Leitura do display (OCR)](#leitura-do-display-ocr)).
 
 ## Pré-requisitos
 
@@ -465,6 +465,87 @@ Para comparar com o detector antigo nas mesmas imagens:
 python pipelines/predict_detector.py --checkpoint models/checkpoints/meter_detector.pt --input data/imgs_preprocessed_test --output data/imgs_test_predictions/modelo_antigo
 ```
 
+## Leitura do display (OCR)
+
+A leitura usa dois modelos treinados: um detector do display (Faster R-CNN, o mesmo do medidor, com a classe `Display`) e um reconhecedor que lê os dígitos no recorte.
+
+```text
+fotos pré-processadas --crop_detector.py (detector de display)--> data/display_crops/<lote>/  (recortes + manifest.csv)
+                      --read_meter.py (reconhecedor)----------> data/readings/<lote>/       (readings.csv)
+                      --evaluate_ocr.py-----------------------> evaluation.csv               (compara com os CSVs)
+```
+
+### Treinar
+
+1. **Detector de display**: anote a classe `display` no CVAT e exporte em COCO para `data/annotations/instances_default.json`. O treino é o mesmo semi-supervisionado do medidor, com outra seção do config. `max_image_id` diz até qual imagem a tarefa foi anotada, porque as imagens seguintes virariam negativas.
+
+   ```bash
+   python pipelines/train_semi_supervised.py --section display_detector
+   ```
+
+2. **Recortes de display** de cada lote, tirados da foto original colorida:
+
+   ```bash
+   python pipelines/crop_detector.py --checkpoint models/checkpoints/display/best.pt \
+       --input data/preprocessed_images/<lote>_preprocessed --crop-source data/raw_images/<lote> \
+       --output data/display_crops/<lote> --threshold 0.5 --margin 0.15 --min-size 8
+   ```
+
+3. **Reconhecedor**: usa os recortes e a coluna `Posicao do medidor lida` dos CSVs como rótulo, e divide as fotos em treino, validação e teste (80/10/10).
+
+   ```bash
+   python pipelines/train_recognizer.py
+   ```
+
+O reconhecedor (`models/recognizer.py`) é uma CNN com BiLSTM que classifica 6 posições fixas. A leitura entra completada com zeros à esquerda ("4939" vira "004939"), porque o display mostra esses zeros e o CSV não. Testamos CTC antes, e ele ficava preso emitindo só "vazio".
+
+### Ler e avaliar
+
+```bash
+python pipelines/read_meter.py --input data/display_crops/<lote> --output data/readings/<lote>
+python pipelines/evaluate_ocr.py --readings data/readings/<lote> --only-test
+```
+
+Status no `readings.csv`:
+
+- `lido`: confiança ≥ `accept_confidence` (0,9), pode ser aceita automaticamente;
+- `leitura_suspeita`: confiança baixa, vai para conferência humana;
+- `sem_leitura`: o detector não achou display na foto.
+
+Use `--only-test`: o reconhecedor foi treinado com fotos desses mesmos lotes, e avaliar nelas infla o resultado (98% de acerto nas `lido` contra 84% no teste).
+
+### Resultado atual (conjunto de teste, 960 fotos)
+
+| Aceitar se confiança ≥ | Cobertura | Acerto contra o CSV |
+|---|---|---|
+| 0 (todas) | 100% | 36% |
+| 0,7 | 43% | 72% |
+| 0,9 | 28% | 84% |
+| 0,95 | 21% | 89% |
+
+O acerto contra o CSV subestima o modelo. Parte das fotos é ilegível (borrada, escura, reflexo), e parte do CSV está errada: o leiturista digitou outro valor ou outro registro. Para medir a acurácia real, confira à mão uma amostra do teste:
+
+```bash
+python utils/build_review_page.py              # gera data/review/review.html
+python utils/score_review.py --review data/review/review.csv
+```
+
+A página embute fotos do cliente e fica em `data/review/`, fora do git.
+
+Resultado da conferência de 200 fotos do teste:
+
+| | Valor |
+|---|---|
+| Fotos ilegíveis (borrada, escura, reflexo, display apagado) | 52% |
+| CSV correto nas fotos legíveis | 76% |
+| Modelo correto nas fotos legíveis | 63,5% |
+| Modelo nas legíveis com confiança ≥ 0,95 | 92% de acerto em 38% delas |
+| Confiança média do modelo nas ilegíveis | 0,38 |
+
+Aceitando só confiança ≥ 0,95, o modelo lê sozinho 18% de todas as fotos, com 89% de acerto (33 de 37), e o resto vai para conferência humana. O maior limitador é a qualidade da foto, não o modelo: um backbone ResNet18 pré-treinado e uma limpeza de rótulos por validação cruzada (`clean_folds`) não melhoraram o resultado.
+
+A linha de base com EasyOCR pré-treinado e localização heurística com OpenCV ficou em 3%. Mesmo escolhendo o texto certo, o EasyOCR só via a leitura em cerca de 10% das fotos, por causa dos dígitos de 7 segmentos e da resolução baixa.
+
 ## Verificação rápida
 
 Depois do treinamento, valide o checkpoint:
@@ -556,12 +637,18 @@ Os scripts também configuram a raiz do projeto no `sys.path` quando executados 
 - `pipelines/train_detector.py`: split, treinamento, validação, logging e checkpoint.
 - `pipelines/predict_detector.py`: carregamento do checkpoint e desenho das caixas.
 - `src/image_preprocessing.py`: análise de brilho, ruído e filtros.
+- `models/recognizer.py`: reconhecedor da leitura (CNN + BiLSTM, 6 dígitos).
+- `src/meter_reading.py`: status da leitura pela confiança.
+- `pipelines/train_recognizer.py`: treino do reconhecedor com as leituras dos CSVs.
+- `pipelines/read_meter.py`: leitura dos recortes de display.
+- `pipelines/evaluate_ocr.py`: acurácia das leituras contra os CSVs dos leituristas.
+- `utils/build_review_page.py` e `utils/score_review.py`: conferência manual de uma amostra.
 - `utils/image_convert.py`: conversão de imagens para matrizes e tensores.
 - `configs/detector.json`: configuração de treinamento e inferência.
 
 ## Limitações atuais
 
-- O projeto detecta a região do medidor, mas não faz OCR da leitura.
+- O reconhecedor acerta 36% contra o CSV no teste (84% nas leituras com confiança ≥ 0,9, que são 28% das fotos); a acurácia real em fotos legíveis ainda precisa da conferência manual.
 - A implementação escolhe a célula de maior confiança na predição.
 - Não há cálculo de IoU, mAP, precision ou recall no pipeline.
 - A qualidade final depende diretamente da qualidade das bounding boxes COCO.

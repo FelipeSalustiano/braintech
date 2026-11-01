@@ -53,6 +53,9 @@ DEFAULTS = {
     "validation_ratio": 0.2,
     "seed": 42,
     "num_workers": 4,
+    "class_name": "Medidor",
+    # Imagens com id acima deste ficam fora: a tarefa do CVAT ainda não foi anotada até o fim
+    "max_image_id": None,
 }
 
 logger = logging.getLogger(__name__)
@@ -170,7 +173,7 @@ def train_model(
                 {
                     "model_state_dict": model.state_dict(),
                     "epoch": epoch,
-                    "class_names": ["Medidor"],
+                    "class_names": [settings["class_name"]],
                     "architecture": "fasterrcnn_resnet50_fpn_v2",
                     "metrics": metrics,
                 },
@@ -208,7 +211,8 @@ def generate_pseudo_labels(model, unlabeled_paths: list[Path], settings: dict, d
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("configs/detector.json"))
-    parser.add_argument("--log-file", type=Path, default=Path("logs/semi_supervised.log"))
+    parser.add_argument("--section", default="semi_supervised", help="Seção do config: semi_supervised (medidor) ou display_detector")
+    parser.add_argument("--log-file", type=Path, help="Padrão: logs/<section>.log")
     parser.add_argument("--rounds", type=int)
     parser.add_argument("--teacher-epochs", type=int)
     parser.add_argument("--student-epochs", type=int)
@@ -223,16 +227,17 @@ def main() -> None:
     settings = dict(DEFAULTS)
     if args.config.is_file():
         with args.config.open(encoding="utf-8") as config_file:
-            settings.update(json.load(config_file).get("semi_supervised", {}))
+            settings.update(json.load(config_file).get(args.section, {}))
     for key in ("rounds", "teacher_epochs", "student_epochs", "batch_size", "num_workers"):
         if getattr(args, key) is not None:
             settings[key] = getattr(args, key)
 
-    args.log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file = args.log_file or Path("logs") / f"{args.section}.log"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(message)s",
-        handlers=[logging.StreamHandler(), logging.FileHandler(args.log_file, encoding="utf-8")],
+        handlers=[logging.StreamHandler(), logging.FileHandler(log_file, encoding="utf-8")],
     )
     set_seed(settings["seed"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -240,6 +245,9 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     labeled = load_coco_samples(Path(settings["annotations"]), Path(settings["labeled_images"]))
+    if settings["max_image_id"] is not None:
+        # Sem esse corte, as imagens ainda não anotadas virariam negativas
+        labeled = [s for s in labeled if s["image_id"] <= settings["max_image_id"]]
     training, validation = split_labeled(labeled, settings["validation_ratio"], settings["seed"])
     unlabeled_paths = [path for folder in settings["unlabeled_images"] for path in list_images(Path(folder))]
     if args.unlabeled_limit:

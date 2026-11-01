@@ -1,0 +1,65 @@
+{
+  "best_epoch": 39,
+  "settings": {
+    "crops_root": "data/display_crops",
+    "sheets": "data/sheets",
+    "output_dir": "models/checkpoints/recognizer",
+    "epochs": 40,
+    "batch_size": 64,
+    "learning_rate": 0.001,
+    "validation_ratio": 0.1,
+    "test_ratio": 0.1,
+    "seed": 42,
+    "min_detection_score": 0.5
+  },
+  "validation": {
+    "accuracy": 0.38645833333333335,
+    "by_confidence": {
+      "0.0": {
+        "coverage": 1.0,
+        "accuracy": 0.38645833333333335
+      },
+      "0.5": {
+        "coverage": 0.61875,
+        "accuracy": 0.601010101010101
+      },
+      "0.7": {
+        "coverage": 0.4354166666666667,
+        "accuracy": 0.7511961722488039
+      },
+      "0.9": {
+        "coverage": 0.28125,
+        "accuracy": 0.8444444444444444
+      },
+      "0.95": {
+        "coverage": 0.21666666666666667,
+        "accuracy": 0.875
+      }
+    }
+  },
+  "test": {
+    "accuracy": 0.36041666666666666,
+    "by_confidence": {
+      "0.0": {
+        "coverage": 1.0,
+        "accuracy": 0.36041666666666666
+      },
+      "0.5": {
+        "coverage": 0.5864583333333333,
+        "accuracy": 0.5914742451154529
+      },
+      "0.7": {
+        "coverage": 0.4322916666666667,
+        "accuracy": 0.7228915662650602
+      },
+      "0.9": {
+        "coverage": 0.28020833333333334,
+        "accuracy": 0.8364312267657993
+      },
+      "0.95": {
+        "coverage": 0.20520833333333333,
+        "accuracy": 0.8883248730964467
+      }
+    }
+  }
+}

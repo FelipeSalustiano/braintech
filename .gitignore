@@ -12,6 +12,10 @@ data/preprocessed_images/
 data/sheets/
 data/crops*/
 data/annotations
+data/display_crops/
+data/readings/
+# Página de conferência embute fotos do cliente em base64
+data/review/
 
 # Lab 02: fotos do cliente nunca no repositorio
 *.jpg
@@ -20,3 +24,7 @@ data/annotations
 
 # Checkpoints do detector semi-supervisionado (~170 MB cada)
 models/checkpoints/semi_supervised/*.pt
+models/checkpoints/display/*.pt
+
+# Split e predições do reconhecedor trazem leituras e códigos de instalação das planilhas do cliente
+models/checkpoints/recognizer/*.csv
