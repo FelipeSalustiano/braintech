@@ -87,7 +87,7 @@ ITEMS.forEach((item, i) => {{
       <div class="num">${{i + 1}} / ${{ITEMS.length}}</div>
       <img class="display" src="${{item.display}}" alt="Display">
       <div class="controls">
-        <input type="text" inputmode="numeric" autocomplete="off" placeholder="leitura">
+        <input type="text" inputmode="numeric" autocomplete="off" maxlength="6" placeholder="leitura">
         <label><input type="checkbox"> ilegível</label>
       </div>
     </div>

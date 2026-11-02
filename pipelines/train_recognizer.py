@@ -7,12 +7,18 @@ test_predictions.csv e summary.json.
 
 As leituras dos CSVs são digitadas pelo leiturista, então há algum ruído de
 rótulo; a acurácia de teste é um limite inferior da acurácia real.
+
+As fotos de treino conferidas à mão (data/review/review_train_*.csv, exportados
+pelas páginas do utils/build_review_page.py) trocam a leitura do CSV pela
+conferida. As marcadas como ilegíveis não ensinam dígitos: ensinam a saída de
+legibilidade, que só aprende com fotos conferidas.
 """
 
 import argparse
 import csv
 import json
 import logging
+import math
 import random
 import sys
 import time
@@ -27,7 +33,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from models.recognizer import DisplayDataset, MeterReader, collate, decode, load_display, train_transform
+from models.recognizer import NUM_DIGITS, DisplayDataset, MeterReader, collate, decode, load_display, train_transform
 from pipelines.evaluate_ocr import load_ground_truth, photo_key
 from src.meter_reading import same_reading
 
@@ -43,6 +49,10 @@ DEFAULTS = {
     "seed": 42,
     # Recortes do detector com score abaixo disso ficam fora do treino (caixa duvidosa)
     "min_detection_score": 0.5,
+    # CSVs exportados das páginas de conferência das fotos de treino
+    "reviews": "data/review/review_train_*.csv",
+    # Quantas vezes cada foto conferida entra por época: rótulo limpo vale mais que o do CSV
+    "review_repeat": 3,
     # Limpeza de rótulos por validação cruzada (0 desliga): ver label_scores().
     # Testada com 4 folds e limiar 0,2: piorou (63,5% -> 59,4% nas fotos
     # legíveis conferidas à mão) porque o modelo deixa de ver displays
@@ -79,6 +89,37 @@ def load_samples(crops_root: Path, sheets: Path, min_score: float) -> list[dict]
     return samples
 
 
+def load_reviews(pattern: str) -> dict[str, str | None]:
+    """Leitura conferida por foto; None quando marcada como ilegível."""
+    reviews = {}
+    for path in sorted(Path().glob(pattern)):
+        with path.open(encoding="utf-8") as review_file:
+            for row in csv.DictReader(review_file):
+                if row["illegible"] == "1":
+                    reviews[row["image"]] = None
+                elif row["human_reading"]:
+                    reading = str(int(row["human_reading"]))
+                    if len(reading) > NUM_DIGITS:
+                        # Erro de digitação na conferência: a foto fica com o rótulo do CSV
+                        logger.warning("Ignoring review of %s in %s: %r has more than %d digits", row["image"], path.name, row["human_reading"], NUM_DIGITS)
+                        continue
+                    reviews[row["image"]] = reading
+    return reviews
+
+
+def apply_reviews(train: list[dict], reviews: dict[str, str | None], repeat: int) -> list[dict]:
+    """Troca o rótulo do CSV pelo conferido e repete as fotos conferidas `repeat` vezes."""
+    result = []
+    for sample in train:
+        if sample["image"] not in reviews:
+            result.append({**sample, "illegible": math.nan})
+            continue
+        reading = reviews[sample["image"]]
+        reviewed = {**sample, "label": reading or "", "illegible": 0.0 if reading else 1.0}
+        result += [reviewed] * repeat
+    return result
+
+
 def split_samples(samples: list[dict], validation_ratio: float, test_ratio: float, seed: int) -> dict[str, list[dict]]:
     indices = list(range(len(samples)))
     random.Random(seed).shuffle(indices)
@@ -92,14 +133,16 @@ def split_samples(samples: list[dict], validation_ratio: float, test_ratio: floa
 
 
 @torch.inference_mode()
-def predict(model, loader, device) -> list[tuple[str, float]]:
+def predict(model, loader, device) -> tuple[list[tuple[str, float]], list[float]]:
+    """Leitura e confiança de cada recorte, e a probabilidade de estar ilegível."""
     model.eval()
-    results = []
-    for images, _, _ in loader:
+    results, illegible = [], []
+    for images, _, _, _ in loader:
         with torch.autocast(device.type, enabled=device.type == "cuda"):
-            logits = model(images.to(device, non_blocking=True))
+            logits, illegible_logits = model(images.to(device, non_blocking=True))
         results += decode(logits.float().cpu())
-    return results
+        illegible += illegible_logits.float().sigmoid().cpu().tolist()
+    return results, illegible
 
 
 def accuracy_report(predictions: list[tuple[str, float]], labels: list[str]) -> dict:
@@ -144,18 +187,26 @@ def fit(train_dataset, validation_dataset, epochs: int, settings: dict, device, 
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer, max_lr=settings["learning_rate"], total_steps=epochs * len(train_loader), pct_start=0.15,
     )
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(reduction="none")
+    legibility_criterion = nn.BCEWithLogitsLoss()
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
     best_accuracy, best_epoch = -1.0, 0
 
     for epoch in range(1, epochs + 1):
         model.train()
         started, running_loss = time.time(), 0.0
-        for images, targets, _ in train_loader:
-            images, targets = images.to(device, non_blocking=True), targets.to(device, non_blocking=True)
+        for images, targets, labels, illegible in train_loader:
+            images, targets, illegible = (t.to(device, non_blocking=True) for t in (images, targets, illegible))
             with torch.autocast(device.type, enabled=device.type == "cuda"):
-                logits = model(images)
-            loss = criterion(logits.float().reshape(-1, 10), targets.reshape(-1))
+                logits, illegible_logits = model(images)
+            # Foto ilegível não tem leitura: fica fora da perda dos dígitos
+            has_reading = torch.tensor([bool(label) for label in labels], device=device)
+            digit_loss = criterion(logits.float().reshape(-1, 10), targets.reshape(-1)).view(-1, NUM_DIGITS).mean(1)
+            loss = digit_loss[has_reading].mean() if has_reading.any() else digit_loss.sum() * 0
+            # Legibilidade só é conhecida nas fotos conferidas (as outras vêm NaN)
+            known = ~torch.isnan(illegible)
+            if known.any():
+                loss = loss + legibility_criterion(illegible_logits.float()[known], illegible[known])
             optimizer.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -165,14 +216,14 @@ def fit(train_dataset, validation_dataset, epochs: int, settings: dict, device, 
             scheduler.step()
             running_loss += loss.item()
 
-        report = accuracy_report(predict(model, validation_loader, device), validation_dataset.labels)
+        report = accuracy_report(predict(model, validation_loader, device)[0], validation_dataset.labels)
         logger.info(
             "[%s] Epoch %03d/%03d | loss=%.4f | val_acc=%.4f | %.0fs",
             tag, epoch, epochs, running_loss / len(train_loader), report["accuracy"], time.time() - started,
         )
         if report["accuracy"] > best_accuracy:
             best_accuracy, best_epoch = report["accuracy"], epoch
-            save_checkpoint({"model_state_dict": model.state_dict(), "epoch": epoch, "architecture": "meter_reader_6_digits"}, checkpoint_path)
+            save_checkpoint({"model_state_dict": model.state_dict(), "epoch": epoch, "architecture": "meter_reader_6_digits_legibility"}, checkpoint_path)
 
     model.load_state_dict(torch.load(checkpoint_path, map_location=device, weights_only=True)["model_state_dict"])
     return model, best_epoch
@@ -184,8 +235,8 @@ def label_probability(model, dataset, device) -> list[float]:
     model.eval()
     loader = DataLoader(dataset, batch_size=256, collate_fn=collate)
     scores = []
-    for images, targets, _ in loader:
-        probabilities = model(images.to(device)).float().softmax(-1).cpu()
+    for images, targets, _, _ in loader:
+        probabilities = model(images.to(device))[0].float().softmax(-1).cpu()
         label_probabilities = probabilities.gather(-1, targets[..., None]).squeeze(-1)  # (N, 6)
         scores += label_probabilities.min(-1).values.tolist()
     return scores
@@ -272,12 +323,22 @@ def main() -> None:
     logger.info("Device: %s | settings: %s", device, json.dumps(settings))
     logger.info("Samples: %s", {name: len(group) for name, group in splits.items()})
 
+    # Só o treino usa a conferência: as fotos conferidas do teste medem o modelo (utils/score_review.py)
+    reviews = load_reviews(settings["reviews"])
+    reviewed_train = [s for s in splits["train"] if s["image"] in reviews]
+    splits["train"] = apply_reviews(splits["train"], reviews, settings["review_repeat"])
+    logger.info(
+        "Reviewed training photos: %d (%d illegible), outside the training split: %d",
+        len(reviewed_train), sum(reviews[s["image"]] is None for s in reviewed_train), len(reviews) - len(reviewed_train),
+    )
+
     # Tudo em memória: ~11 mil recortes de 48 x 160 são ~80 MB e dispensam workers no Windows
     datasets = {
         name: DisplayDataset(
             [load_display(s["crop_path"]) for s in group],
             [s["label"] for s in group],
             transform=train_transform() if name == "train" else None,
+            illegible=[s.get("illegible", math.nan) for s in group],
         )
         for name, group in splits.items()
     }
@@ -301,15 +362,15 @@ def main() -> None:
 
     checkpoint_path = output_dir / "best.pt"
     model, best_epoch = fit(datasets["train"], datasets["validation"], settings["epochs"], settings, device, checkpoint_path, "final")
-    validation_report = accuracy_report(predict(model, eval_loaders["validation"], device), datasets["validation"].labels)
-    test_predictions = predict(model, eval_loaders["test"], device)
+    validation_report = accuracy_report(predict(model, eval_loaders["validation"], device)[0], datasets["validation"].labels)
+    test_predictions, test_illegible = predict(model, eval_loaders["test"], device)
     test_report = accuracy_report(test_predictions, datasets["test"].labels)
 
     with (output_dir / "test_predictions.csv").open("w", newline="", encoding="utf-8") as predictions_file:
         writer = csv.writer(predictions_file)
-        writer.writerow(["image", "lot", "label", "reading", "confidence", "correct"])
-        for sample, (text, score) in zip(splits["test"], test_predictions):
-            writer.writerow([sample["image"], sample["lot"], sample["label"], text, f"{score:.4f}", same_reading(text, sample["label"])])
+        writer.writerow(["image", "lot", "label", "reading", "confidence", "illegible_prob", "correct"])
+        for sample, (text, score), illegible in zip(splits["test"], test_predictions, test_illegible):
+            writer.writerow([sample["image"], sample["lot"], sample["label"], text, f"{score:.4f}", f"{illegible:.4f}", same_reading(text, sample["label"])])
 
     summary = {"best_epoch": best_epoch, "settings": settings, "validation": validation_report, "test": test_report}
     with (output_dir / "summary.json").open("w", encoding="utf-8") as summary_file:

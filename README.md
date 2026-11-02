@@ -500,13 +500,17 @@ Os CSVs que o `train_recognizer.py` grava junto do checkpoint (`split.csv`, `tes
        --output data/display_crops/<lote> --threshold 0.5 --margin 0.15 --min-size 8
    ```
 
-3. **Reconhecedor**: usa os recortes e a coluna `Posicao do medidor lida` dos CSVs como rótulo, e divide as fotos em treino, validação e teste (80/10/10).
+3. **Reconhecedor**: usa os recortes e a coluna `Posicao do medidor lida` dos CSVs como rótulo, e divide as fotos em treino, validação e teste (80/10/10). As fotos de treino conferidas à mão (`data/review/review_train_*.csv`, ver [Conferência manual](#conferência-manual)) usam a leitura conferida no lugar da do CSV.
 
    ```bash
    python pipelines/train_recognizer.py
    ```
 
 O reconhecedor (`models/recognizer.py`) é uma CNN com BiLSTM que classifica 6 posições fixas. A leitura entra completada com zeros à esquerda ("4939" vira "004939"), porque o display mostra esses zeros e o CSV não. Testamos CTC antes, e ele ficava preso emitindo só "vazio".
+
+Uma segunda saída estima a probabilidade de o display estar ilegível. Ela só aprende com as fotos conferidas, porque o CSV não diz se a foto é legível: as marcadas como ilegíveis ensinam essa saída e ficam fora da perda dos dígitos. A saída lê as features sem devolver gradiente para elas (`detach`); com gradiente, os dígitos não saíam do platô inicial.
+
+No config, `reviews` é o padrão dos CSVs de conferência e `review_repeat` diz quantas vezes cada foto conferida entra por época. Com 3, o acerto entre as leituras aceitas subiu em relação a 1 (ver resultados abaixo).
 
 ### Ler e avaliar
 
@@ -519,39 +523,48 @@ Status no `readings.csv`:
 
 - `lido`: confiança ≥ `accept_confidence` (0,9), pode ser aceita automaticamente;
 - `leitura_suspeita`: confiança baixa, vai para conferência humana;
+- `ilegivel`: probabilidade de display ilegível ≥ `max_illegible_prob` (0,5), pedir nova foto;
 - `sem_leitura`: o detector não achou display na foto.
 
-Use `--only-test`: o reconhecedor foi treinado com fotos desses mesmos lotes, e avaliar nelas infla o resultado (98% de acerto nas `lido` contra 84% no teste).
+O `readings.csv` traz também a coluna `illegible_prob`. Use `--only-test`: o reconhecedor foi treinado com fotos desses mesmos lotes, e avaliar nelas infla o resultado.
 
 ### Resultado atual (conjunto de teste, 960 fotos)
 
 | Aceitar se confiança ≥ | Cobertura | Acerto contra o CSV |
 |---|---|---|
-| 0 (todas) | 100% | 36% |
-| 0,7 | 43% | 72% |
-| 0,9 | 28% | 84% |
-| 0,95 | 21% | 89% |
+| 0 (todas) | 100% | 35% |
+| 0,7 | 32% | 77% |
+| 0,9 | 15% | 87% |
+| 0,95 | 10% | 91% |
 
-O acerto contra o CSV subestima o modelo. Parte das fotos é ilegível (borrada, escura, reflexo), e parte do CSV está errada: o leiturista digitou outro valor ou outro registro. Para medir a acurácia real, confira à mão uma amostra do teste:
+Com o `read_meter.py` (confiança ≥ 0,9 e filtro de legibilidade), 15% das fotos do teste saem como `lido`, com 89% de acerto contra o CSV, e 43% saem como `ilegivel`. Nas `ilegivel`, a leitura do modelo bate com o CSV em só 7%.
+
+O acerto contra o CSV subestima o modelo. Parte das fotos é ilegível (borrada, escura, reflexo), e parte do CSV está errada: o leiturista digitou outro valor ou outro registro. A acurácia real vem da conferência manual.
+
+### Conferência manual
 
 ```bash
-python utils/build_review_page.py              # gera data/review/review.html
+python utils/build_review_page.py                             # 200 fotos do teste -> data/review/review.html
+python utils/build_review_page.py --subset train --size 1000  # 5 páginas de 200 do treino
 python utils/score_review.py --review data/review/review.csv
 ```
 
-A página embute fotos do cliente e fica em `data/review/`, fora do git.
+Quem confere digita a leitura que vê, ou marca "ilegível", e exporta o CSV pelo botão da página. Os CSVs vão para `data/review/` com o nome que a página dá. Os do teste (`review.csv`) medem o modelo; os do treino (`review_train_NN.csv`) entram no treino do reconhecedor. Mantenha separadas as páginas de teste e de treino: conferir fotos do teste e treinar com elas invalidaria a medida.
 
-Resultado da conferência de 200 fotos do teste:
+As páginas embutem fotos do cliente e ficam em `data/review/`, fora do git.
 
-| | Valor |
-|---|---|
-| Fotos ilegíveis (borrada, escura, reflexo, display apagado) | 52% |
-| CSV correto nas fotos legíveis | 76% |
-| Modelo correto nas fotos legíveis | 63,5% |
-| Modelo nas legíveis com confiança ≥ 0,95 | 92% de acerto em 38% delas |
-| Confiança média do modelo nas ilegíveis | 0,38 |
+Foram conferidas 200 fotos do teste e 1.000 do treino. Nas 1.000 do treino, 47% eram ilegíveis e o CSV errava 16% das legíveis. Resultado nas 200 fotos do teste, por modelo:
 
-Aceitando só confiança ≥ 0,95, o modelo lê sozinho 18% de todas as fotos, com 89% de acerto (33 de 37), e o resto vai para conferência humana. O maior limitador é a qualidade da foto, não o modelo: um backbone ResNet18 pré-treinado e uma limpeza de rótulos por validação cruzada (`clean_folds`) não melhoraram o resultado.
+| | Antes (só CSV) | Com 1.000 fotos conferidas |
+|---|---|---|
+| Modelo correto nas fotos legíveis | 63,5% | 61,5% |
+| Confiança média nas ilegíveis | 0,38 | 0,26 |
+| Aceitas com confiança ≥ 0,7 | 37% das fotos, 72% de acerto | 28% das fotos, 84% de acerto |
+| Aceitas com confiança ≥ 0,9 | 24,5% das fotos, 80% de acerto | 15% das fotos, 97% de acerto |
+| Ilegíveis aceitas com confiança ≥ 0,9 | 2 | 0 |
+| Saída de legibilidade (≥ 0,5) | não havia | marca 88% das ilegíveis e 10% das legíveis |
+
+Nas aceitas, foto ilegível conta como erro. Com o modelo novo, `accept_confidence` 0,7 tem cobertura parecida com a do modelo antigo em 0,9 e acerto maior; 0,9 aceita menos fotos com quase nenhum erro. O maior limitador continua sendo a qualidade da foto: um backbone ResNet18 pré-treinado e uma limpeza de rótulos por validação cruzada (`clean_folds`) não melhoraram o resultado.
 
 A linha de base com EasyOCR pré-treinado e localização heurística com OpenCV ficou em 3%. Mesmo escolhendo o texto certo, o EasyOCR só via a leitura em cerca de 10% das fotos, por causa dos dígitos de 7 segmentos e da resolução baixa.
 

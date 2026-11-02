@@ -53,6 +53,21 @@ def main() -> None:
         print(f"  >= {level:<4}  cobertura {len(accepted) / max(len(legible), 1):.1%} | acerto {rate(accepted['model_ok'])}")
     print("\nConfiança média do modelo nas ilegíveis:", f"{df[illegible]['confidence'].mean():.2f}" if illegible.any() else "n/a")
 
+    # O que importa em produção: das leituras aceitas automaticamente, quantas estão certas.
+    # Foto ilegível aceita conta como erro: não há leitura que confirme o valor.
+    df["ok"] = ~illegible & pd.Series([same_reading(a, b) for a, b in zip(df["reading"], df["human_reading"])], index=df.index)
+    illegible_prob = df["illegible_prob"] if "illegible_prob" in df else pd.Series(0.0, index=df.index)
+    rules = [("só confiança", 1.01)] + ([("ilegível < 0.5", 0.5)] if "illegible_prob" in df else [])
+    for name, limit in rules:
+        print(f"\nAceitas entre todas as conferidas ({name}):")
+        for level in (0.5, 0.7, 0.9, 0.95):
+            accepted = df[(df["confidence"] >= level) & (illegible_prob < limit)]
+            wrong_illegible = int((accepted["illegible"].astype(str) == "1").sum())
+            print(f"  >= {level:<4}  aceitas {len(accepted) / len(df):.1%} | acerto {rate(accepted['ok'])} | ilegíveis aceitas {wrong_illegible}")
+    if "illegible_prob" in df:
+        flagged = illegible_prob >= 0.5
+        print(f"\nSaída de legibilidade (>= 0.5): marca {rate(flagged[illegible])} das ilegíveis e {rate(flagged[~illegible])} das legíveis")
+
 
 if __name__ == "__main__":
     main()

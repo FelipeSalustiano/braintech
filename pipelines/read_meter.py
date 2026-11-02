@@ -6,6 +6,7 @@ Saída, em `output`: readings.csv, uma linha por foto do manifest, com a
 leitura, a confiança e o status:
 - lido: confiança >= accept_confidence, pode ser aceita automaticamente;
 - leitura_suspeita: confiança baixa, vai para conferência humana;
+- ilegivel: probabilidade de display ilegível >= max_illegible_prob;
 - sem_leitura: o detector não achou display na foto.
 """
 
@@ -29,8 +30,9 @@ DEFAULTS = {
     "output": "data/readings",
     "checkpoint": "models/checkpoints/recognizer/best.pt",
     "accept_confidence": 0.9,
+    "max_illegible_prob": 0.5,
 }
-READINGS_FIELDS = ["image", "crop_status", "detection_score", "status", "reading", "confidence"]
+READINGS_FIELDS = ["image", "crop_status", "detection_score", "status", "reading", "confidence", "illegible_prob"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -76,11 +78,12 @@ def main() -> None:
         if row["image"] not in prediction_by_image:
             output["status"] = STATUS_SEM_LEITURA
         else:
-            reading, confidence = prediction_by_image[row["image"]]
+            reading, confidence, illegible_prob = prediction_by_image[row["image"]]
             output.update({
-                "status": reading_status(reading, confidence, accept_confidence),
+                "status": reading_status(reading, confidence, accept_confidence, illegible_prob, settings["max_illegible_prob"]),
                 "reading": reading,
                 "confidence": f"{confidence:.4f}",
+                "illegible_prob": f"{illegible_prob:.4f}",
             })
         rows.append(output)
 
