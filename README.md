@@ -111,10 +111,12 @@ fotos de teste e a migração do banco.
 
 ### Passo a passo
 
-1. **Clonar e instalar o Python** (ver [Instalação](#instalação) para detalhes):
+1. **Clonar e instalar o Python** (ver [Instalação](#instalação) para detalhes). O `--depth 1` baixa
+   só a versão atual, sem o histórico (que tem centenas de MB de fotos antigas). Depois que a
+   branch `painel-voltlens` entrar na `main`, tire o `--branch painel-voltlens`.
 
    ```bash
-   git clone https://github.com/FelipeSalustiano/braintech.git
+   git clone --depth 1 --branch painel-voltlens https://github.com/FelipeSalustiano/braintech.git
    cd braintech
    python -m venv .venv
    .venv\Scripts\activate            # Linux/macOS: source .venv/bin/activate
