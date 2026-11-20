@@ -126,7 +126,7 @@ fotos de teste e a migração do banco.
 2. **Baixar o detector de display** e colocá-lo em `models/checkpoints/display/best.pt`
    (crie a pasta `display/` se não existir):
 
-   **Link:** _[detector de display (best.pt)](COLE_AQUI_O_LINK_DO_DRIVE)_
+   **Link:** _[detector de display (best.pt)](https://drive.google.com/file/d/1pfRHWKYFzT1bCrEQLl9Hc6HpCwQCNCwH/view?usp=drive_link)_
 
 3. **Configurar as chaves do Supabase** (os dois arquivos ficam fora do git):
 
