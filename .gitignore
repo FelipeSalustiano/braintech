@@ -42,3 +42,6 @@ utils/ocr_viewer_template.html
 .env.*.local
 !.env.example
 
+
+# Fotos baixadas do Supabase pelo scripts/ponta_a_ponta.py
+data/entrada/

@@ -1,15 +1,20 @@
 """
 Apaga do Supabase os dados do painel VoltLens, para começar do zero (ex.: antes de uma apresentação).
 
-Apaga: as imagens do bucket "leituras", as linhas de decisoes, questionarios, leituras e
-lotes e, com --contas, as contas do painel (e-mails @voltlens.local). As tabelas, as
-regras de acesso e o bucket continuam lá: depois é só rodar scripts/ponta_a_ponta.py.
+Apaga o resultado do processamento: os recortes do bucket "leituras", as linhas de
+decisoes, questionarios, leituras e lotes e, com --contas, as contas do painel
+(e-mails @voltlens.local).
+
+Mantém as fotos de entrada (<lote>/fotos/), que o scripts/ponta_a_ponta.py baixa para
+processar; com --fotos, apaga também essas (depois, reenvie com scripts/supabase_enviar_fotos.py).
+As tabelas, as regras de acesso e o bucket continuam lá.
 
 Usa SUPABASE_URL e SUPABASE_SECRET_KEY do .env da raiz. Pede confirmação antes de apagar.
 
 Uso, na raiz do projeto:
-    python scripts/supabase_limpar.py            # dados e imagens
-    python scripts/supabase_limpar.py --contas   # dados, imagens e contas
+    python scripts/supabase_limpar.py            # resultados (recortes e linhas)
+    python scripts/supabase_limpar.py --contas   # resultados e contas
+    python scripts/supabase_limpar.py --contas --fotos   # tudo, inclusive as fotos de entrada
 """
 
 import argparse
@@ -27,17 +32,21 @@ TABELAS = [("decisoes", "id"), ("questionarios", "lote_id"), ("leituras", "id"),
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--contas", action="store_true", help="Apaga também as contas do painel")
+    parser.add_argument("--fotos", action="store_true", help="Apaga também as fotos de entrada (<lote>/fotos/)")
     parser.add_argument("--sim", action="store_true", help="Não pede confirmação")
     args = parser.parse_args()
 
     sb = Supabase.from_env()
     dominio = "@" + os.environ.get("VOLTLENS_LOGIN_DOMAIN", "voltlens.local")
-    objetos = sorted(sb.list_objects(BUCKET, ""))
+    todos = sorted(sb.list_objects(BUCKET, ""))
+    entrada = [o for o in todos if o.split("/")[1:2] == ["fotos"]]  # <lote>/fotos/<arquivo>
+    objetos = todos if args.fotos else [o for o in todos if o not in set(entrada)]
     contagens = {t: sb.count(t) for t, _ in TABELAS}
     contas = [u for u in sb.list_users() if (u.get("email") or "").endswith(dominio)] if args.contas else []
 
     print(f"Supabase: {sb.url}")
-    print(f"  imagens no bucket '{BUCKET}': {len(objetos)}")
+    print(f"  imagens a apagar no bucket '{BUCKET}': {len(objetos)}"
+          + ("" if args.fotos else f" (mantendo {len(entrada)} fotos de entrada)"))
     for t, n in contagens.items():
         print(f"  linhas em {t}: {n}")
     if args.contas:

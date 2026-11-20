@@ -72,6 +72,15 @@ class Supabase:
         self.request("POST", f"/storage/v1/object/{bucket}/{quoted}", body,
                      {"Content-Type": content_type, "x-upsert": "true", "Cache-Control": "max-age=31536000"})
 
+    def download(self, bucket: str, path: str) -> bytes:
+        req = urllib.request.Request(f"{self.url}/storage/v1/object/{bucket}/{urllib.parse.quote(path)}",
+                                     headers=self._headers())
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as e:
+            raise SupabaseError(f"GET {path} -> {e.code}: {e.read().decode('utf-8', 'replace')[:300]}") from None
+
     def list_objects(self, bucket: str, prefix: str) -> set[str]:
         """Caminhos completos de todos os arquivos abaixo de prefix (percorre as subpastas)."""
         found, pending = set(), [prefix.strip("/")]

@@ -81,19 +81,23 @@ Se você não ativar o ambiente virtual, use diretamente `.venv/bin/python` nos 
 
 ## Demonstração de ponta a ponta (do processamento ao login)
 
-Roteiro para rodar a aplicação inteira numa máquina nova, sem treinar nada: processar as fotos
-de teste com os modelos já treinados, publicar o resultado no Supabase e validar as leituras no
-painel web. Leva uns 20 minutos na primeira vez (a maior parte é a instalação) e 1 a 3 minutos de processamento.
+Roteiro para rodar a aplicação inteira numa máquina nova, sem treinar nada: baixar as fotos de
+teste do Supabase, processá-las com os modelos já treinados, publicar o resultado no Supabase e
+validar as leituras no painel web. Leva uns 20 minutos na primeira vez (a maior parte é a instalação) e 1 a 3 minutos de processamento.
 
 ```text
-data/imgs_raw_test (18 fotos, vêm com o git)
+Supabase Storage: leituras/imgs_raw_test/fotos/  (18 fotos do WhatsApp, enviadas uma vez)
+   │  0. download                     scripts/ponta_a_ponta.py     -> data/entrada/imgs_raw_test
    │  1. pré-processamento            pipelines/preprocessing_images.py
    │  2. recorte do display           pipelines/crop_detector.py   (detector de display)
    │  3. leitura do display (OCR)     pipelines/read_meter.py      (reconhecedor)
-   │  4. publicação                   scripts/supabase_carregar.py
+   │  4. publicação                   scripts/supabase_carregar.py (recortes + leituras)
    ▼
-Supabase (banco + fotos)  ──►  painel web (frontend/)  ──►  login e validação
+Supabase (fotos + recortes + leituras)  ──►  painel web (frontend/)  ──►  login e validação
 ```
+
+As etapas 0 a 4 rodam com um comando só (passo 4 abaixo). O painel mostra cada foto direto do
+Supabase, ao lado do recorte e da leitura que o processamento gerou.
 
 ### O que precisa
 
@@ -107,7 +111,8 @@ Supabase (banco + fotos)  ──►  painel web (frontend/)  ──►  login e 
 - As chaves do projeto Supabase (passo 3). O projeto da demonstração é o `gylsrbkagqjfuipmteca`.
 
 O resto vem com o `git clone`: código, reconhecedor (`models/checkpoints/recognizer/best.pt`),
-fotos de teste e a migração do banco.
+a migração do banco e uma cópia de segurança das fotos de teste em `data/imgs_raw_test/` (o
+processamento usa as do Supabase; a cópia do git serve para reenviá-las, se for preciso).
 
 ### Passo a passo
 
@@ -143,15 +148,22 @@ fotos de teste e a migração do banco.
    `npx supabase projects api-keys --project-ref gylsrbkagqjfuipmteca --reveal`.
    A chave secreta dá acesso total: não a mande por chat nem a coloque no git.
 
-4. **Processar e publicar** (etapas 1 a 4 do diagrama):
+4. **Baixar, processar e publicar** (etapas 0 a 4 do diagrama):
 
    ```bash
    python scripts/ponta_a_ponta.py
    ```
 
-   O script confere antes se o detector, as fotos e as chaves estão no lugar e diz o que falta.
-   Ele apaga as saídas de uma rodada anterior, então tudo é gerado de novo. Para só processar,
-   sem publicar: `--sem-publicar`.
+   As fotos de teste já estão no Supabase do projeto `gylsrbkagqjfuipmteca`. Num projeto novo, ou
+   se o script avisar que não achou fotos no Supabase, envie-as uma vez (fotos já enviadas são puladas):
+
+   ```bash
+   python scripts/supabase_enviar_fotos.py
+   ```
+
+   O script confere antes se o detector e as chaves estão no lugar e diz o que falta. Ele apaga
+   as saídas de uma rodada anterior, então tudo é gerado de novo. Para baixar e processar sem
+   publicar: `--sem-publicar`.
 
    O processamento roda **na CPU mesmo que a máquina tenha GPU**. Na GPU o detector usa precisão
    reduzida (float16), e nas fotos de confiança baixa isso muda a leitura de algumas fotos. Na CPU
@@ -185,12 +197,16 @@ fotos de teste e a migração do banco.
 
 ### Recomeçar do zero
 
-Para ensaiar de novo, apague do Supabase as fotos, as leituras, as decisões e as contas
-(as tabelas continuam lá) e volte ao passo 4:
+Para ensaiar de novo, apague do Supabase o resultado do processamento (recortes, leituras,
+decisões) e as contas, e volte ao passo 4. As fotos de entrada continuam no Supabase, assim como
+as tabelas:
 
 ```bash
 python scripts/supabase_limpar.py --contas
 ```
+
+Para apagar também as fotos de entrada, use `--fotos` (depois, reenvie com
+`python scripts/supabase_enviar_fotos.py`).
 
 ### Projeto Supabase novo
 
@@ -699,9 +715,12 @@ decisões gravadas no banco.
 ```text
 frontend/                 app React (Vite + TypeScript) que roda no navegador
 supabase/migrations/      tabelas, regras de acesso (RLS) e bucket "leituras"
-scripts/supabase_carregar.py       sobe fotos, recortes e leituras para o Supabase
+scripts/supabase_enviar_fotos.py   envia as fotos de um lote (entrada do processamento)
+scripts/ponta_a_ponta.py           baixa as fotos, processa e publica (ver Demonstração de ponta a ponta)
+scripts/supabase_carregar.py       publica recortes e leituras de um lote já processado
 scripts/supabase_criar_usuario.py  cria a conta de quem vai usar o painel
-src/voltlens_dados.py     lê data/readings, data/sheets e o gabarito (usado também pelo protótipo HTML)
+scripts/supabase_limpar.py         apaga resultados, contas e (com --fotos) as fotos de entrada
+src/voltlens_dados.py     lê data/readings, data/sheets e o gabarito
 ```
 
 No banco ficam:
@@ -770,16 +789,18 @@ Entre com o usuário e a senha que você recebeu.
    **Allow new users to sign up**. As contas são criadas pelo script do passo 5.
 4. Copie `.env.example` para `.env` (na raiz) e preencha `SUPABASE_URL` e `SUPABASE_SECRET_KEY`
    (em **Project Settings > API Keys**). A chave secreta ignora as regras de acesso: só nos scripts, nunca no git.
-5. Suba as fotos e crie as contas:
+5. Envie as fotos, processe e crie as contas:
 
    ```bash
-   python scripts/supabase_carregar.py                          # só as fotos de teste (data/imgs_raw_test)
+   python scripts/supabase_enviar_fotos.py                      # fotos de teste -> leituras/imgs_raw_test/fotos/
+   python scripts/ponta_a_ponta.py                              # baixa, processa e publica
    python scripts/supabase_criar_usuario.py maria "senha-da-maria"
    ```
 
-   Para mandar também os lotes PSP: `--lotes PSP_EXTRATLEITIMPL_030726_0121` (um ou mais) ou
-   `--lotes todos`, de preferência com `--amostra 150` (fotos por lote) para caber no plano gratuito (1 GB).
-   O script pode ser rodado de novo: imagens já enviadas são puladas e as linhas são atualizadas.
+   Lotes PSP já processados localmente (com `data/readings/<lote>/readings.csv`) entram assim:
+   `python scripts/supabase_enviar_fotos.py --pasta data/raw_images/<lote> --lote <lote>` e depois
+   `python scripts/supabase_carregar.py --lotes <lote>` (de preferência com `--amostra 150` para caber
+   no plano gratuito de 1 GB). Os dois scripts podem ser rodados de novo sem duplicar nada.
 
 ### Rodar tudo na própria máquina (Supabase local, com Docker)
 
@@ -795,8 +816,9 @@ Use os valores do `status` nos dois arquivos:
 - `.env` (raiz): `SUPABASE_URL` = API URL, `SUPABASE_SECRET_KEY` = Secret (ou service_role key).
 - `frontend/.env.local`: `VITE_SUPABASE_URL` = API URL, `VITE_SUPABASE_PUBLISHABLE_KEY` = Publishable (ou anon key).
 
-Depois os mesmos passos da nuvem: `python scripts/supabase_carregar.py`,
-`python scripts/supabase_criar_usuario.py ...`, e `npm run dev` dentro de `frontend/`.
+Depois os mesmos passos da nuvem: `python scripts/supabase_enviar_fotos.py`,
+`python scripts/ponta_a_ponta.py`, `python scripts/supabase_criar_usuario.py ...` e `npm run dev`
+dentro de `frontend/`.
 
 Para desligar: `npx supabase stop`. Para apagar o banco local e recomeçar: `npx supabase db reset`
 (depois carregue as fotos de novo).
@@ -807,15 +829,19 @@ Para desligar: `npx supabase stop`. Para apagar o banco local e recomeçar: `npx
 - **Nuvem:** https://supabase.com/dashboard, no projeto.
 
 No **Table Editor** estão `lotes`, `leituras`, `decisoes` e `questionarios`; em **Storage**, o bucket
-`leituras` com `<lote>/fotos/` e `<lote>/recortes/`; em **Authentication > Users**, as contas.
+`leituras` com `<lote>/fotos/` (as fotos originais, entrada do processamento) e `<lote>/recortes/`
+(saída); em **Authentication > Users**, as contas.
 Para tirar as decisões de todos em CSV: Table Editor > `decisoes` > Export.
 
-### Diferenças em relação ao protótipo HTML
+### Como o painel funciona
 
-- Login de verdade: só entra quem tem conta (as fotos são do cliente). A tela continua pedindo
-  "Usuário" e "Senha"; por trás, `maria` vira o e-mail `maria@voltlens.local`.
-- As decisões e o questionário ficam no banco: a mesma pessoa vê o progresso em qualquer computador.
-- O resto (filas, filtros, ações em massa, atalhos `A`/`C`/`R`/setas/`F`, resumo e CSV) é o mesmo.
+- Login: só entra quem tem conta (as fotos são do cliente). A tela pede "Usuário" e "Senha";
+  por trás, `maria` vira o e-mail `maria@voltlens.local`.
+- Cada lote abre numa fila com filtros por status, busca e ações em massa. Em cada foto, a pessoa
+  aceita, corrige ou recusa a sugestão do OCR. Atalhos: `A`/`C`/`R`, setas e `F` (modo facilitador,
+  que mostra o gabarito conferido à mão quando existe).
+- As decisões e o questionário do fim do lote ficam no banco: a mesma pessoa vê o progresso em
+  qualquer computador. O resumo do lote exporta as decisões em CSV.
 
 ## Verificação rápida
 
