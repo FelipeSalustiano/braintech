@@ -26,11 +26,13 @@ Imagens COCO anotadas + JSON de anotações
        Imagens com bounding box desenhada
 ```
 
-O projeto detecta o medidor e o display e lê o valor do display com um reconhecedor treinado (veja [Leitura do display (OCR)](#leitura-do-display-ocr)).
+O projeto detecta o medidor e o display e lê o valor do display com um reconhecedor treinado (veja [Leitura do display (OCR)](#leitura-do-display-ocr)). As leituras vão para um painel web de validação (veja [Painel VoltLens](#painel-voltlens-front-end--supabase)).
+
+**Para rodar tudo numa máquina nova, do processamento ao login no painel, siga [Demonstração de ponta a ponta](#demonstração-de-ponta-a-ponta-do-processamento-ao-login).**
 
 ## Pré-requisitos
 
-- Python 3.10 ou superior.
+- Python 3.12 ou superior (o `numpy` de `requirements.txt` exige 3.12).
 - GPU NVIDIA com CUDA é recomendada, mas o treinamento também pode usar CPU.
 - Dependências.
 
@@ -77,6 +79,122 @@ PY
 
 Se você não ativar o ambiente virtual, use diretamente `.venv/bin/python` nos comandos deste README.
 
+## Demonstração de ponta a ponta (do processamento ao login)
+
+Roteiro para rodar a aplicação inteira numa máquina nova, sem treinar nada: processar as fotos
+de teste com os modelos já treinados, publicar o resultado no Supabase e validar as leituras no
+painel web. Leva uns 20 minutos na primeira vez (a maior parte é a instalação) e 1 a 3 minutos de processamento.
+
+```text
+data/imgs_raw_test (18 fotos, vêm com o git)
+   │  1. pré-processamento            pipelines/preprocessing_images.py
+   │  2. recorte do display           pipelines/crop_detector.py   (detector de display)
+   │  3. leitura do display (OCR)     pipelines/read_meter.py      (reconhecedor)
+   │  4. publicação                   scripts/supabase_carregar.py
+   ▼
+Supabase (banco + fotos)  ──►  painel web (frontend/)  ──►  login e validação
+```
+
+### O que precisa
+
+- [Python](https://www.python.org/downloads/) 3.12 ou superior (testado com 3.12.10). No Windows, marque
+  "Add python.exe to PATH" na instalação.
+- [Node.js](https://nodejs.org) 22.12 ou superior (testado com 24.19; o Vite exige 20.19+ ou 22.12+).
+- git.
+- GPU não é necessária: o processamento roda na CPU de propósito (veja o passo 4).
+- ~4 GB livres em disco: o PyTorch de `requirements.txt` vem com CUDA, mesmo em máquina sem GPU.
+- O detector de display (`best.pt`, ~173 MB), que não cabe no git: baixe no Drive (passo 2).
+- As chaves do projeto Supabase (passo 3). O projeto da demonstração é o `gylsrbkagqjfuipmteca`.
+
+O resto vem com o `git clone`: código, reconhecedor (`models/checkpoints/recognizer/best.pt`),
+fotos de teste e a migração do banco.
+
+### Passo a passo
+
+1. **Clonar e instalar o Python** (ver [Instalação](#instalação) para detalhes):
+
+   ```bash
+   git clone https://github.com/FelipeSalustiano/braintech.git
+   cd braintech
+   python -m venv .venv
+   .venv\Scripts\activate            # Linux/macOS: source .venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+2. **Baixar o detector de display** e colocá-lo em `models/checkpoints/display/best.pt`
+   (crie a pasta `display/` se não existir):
+
+   **Link:** _[detector de display (best.pt)](COLE_AQUI_O_LINK_DO_DRIVE)_
+
+3. **Configurar as chaves do Supabase** (os dois arquivos ficam fora do git):
+
+   ```bash
+   copy .env.example .env                              # Linux/macOS: cp
+   copy frontend\.env.example frontend\.env.local
+   ```
+
+   - `.env`: `SUPABASE_URL=https://gylsrbkagqjfuipmteca.supabase.co` e a chave **secreta** (`sb_secret_...`).
+   - `frontend/.env.local`: a mesma URL em `VITE_SUPABASE_URL` e a chave **pública** (`sb_publishable_...`).
+
+   As chaves estão em **Project Settings > API Keys** no painel do Supabase. Quem tem acesso ao
+   projeto também pode listá-las com `npx supabase login` e
+   `npx supabase projects api-keys --project-ref gylsrbkagqjfuipmteca --reveal`.
+   A chave secreta dá acesso total: não a mande por chat nem a coloque no git.
+
+4. **Processar e publicar** (etapas 1 a 4 do diagrama):
+
+   ```bash
+   python scripts/ponta_a_ponta.py
+   ```
+
+   O script confere antes se o detector, as fotos e as chaves estão no lugar e diz o que falta.
+   Ele apaga as saídas de uma rodada anterior, então tudo é gerado de novo. Para só processar,
+   sem publicar: `--sem-publicar`.
+
+   O processamento roda **na CPU mesmo que a máquina tenha GPU**. Na GPU o detector usa precisão
+   reduzida (float16), e nas fotos de confiança baixa isso muda a leitura de algumas fotos. Na CPU
+   o resultado é o mesmo em qualquer máquina (testado em Windows e Linux). No fim, o script confere
+   o resultado de referência e mostra:
+
+   ```text
+   Resultado confere com o de referência (18 fotos — lido: 2, leitura_suspeita: 4, ilegivel: 5, sem_leitura: 7).
+   ```
+
+   No painel, isso aparece como 11 displays recortados e 7 fotos sem leitura (o detector não
+   achou o display).
+
+5. **Criar a conta** de quem vai entrar no painel:
+
+   ```bash
+   python scripts/supabase_criar_usuario.py maria "uma-senha"
+   ```
+
+6. **Abrir o painel**:
+
+   ```bash
+   cd frontend
+   npm ci
+   npm run dev
+   ```
+
+   O `npm ci` instala exatamente as versões do `package-lock.json`. Abra http://localhost:5173, entre com o usuário e a senha do passo 5 e valide as leituras.
+   Para ver os dados por dentro: https://supabase.com/dashboard/project/gylsrbkagqjfuipmteca
+   (Table Editor e Storage).
+
+### Recomeçar do zero
+
+Para ensaiar de novo, apague do Supabase as fotos, as leituras, as decisões e as contas
+(as tabelas continuam lá) e volte ao passo 4:
+
+```bash
+python scripts/supabase_limpar.py --contas
+```
+
+### Projeto Supabase novo
+
+Os passos acima usam um projeto que já tem as tabelas. Num projeto novo, antes do passo 4, crie as
+tabelas e desligue o cadastro aberto, como em [Preparar o Supabase na nuvem](#preparar-o-supabase-na-nuvem-uma-vez-por-quem-tem-as-fotos).
+
 ## Arquitetura do projeto
 
 ```text
@@ -113,6 +231,9 @@ braintech/
 ├── utils/
 │   ├── image_convert.py
 │   └── split_dataset.py
+├── frontend/              (painel web, ver "Painel VoltLens")
+├── scripts/               (demonstração de ponta a ponta e Supabase)
+├── supabase/              (migrações do banco)
 ├── Dockerfile
 ├── README.md
 ├── requirements.txt
@@ -567,6 +688,132 @@ Foram conferidas 200 fotos do teste e 1.000 do treino. Nas 1.000 do treino, 47% 
 Nas aceitas, foto ilegível conta como erro. Com o modelo novo, `accept_confidence` 0,7 tem cobertura parecida com a do modelo antigo em 0,9 e acerto maior; 0,9 aceita menos fotos com quase nenhum erro. O maior limitador continua sendo a qualidade da foto: um backbone ResNet18 pré-treinado e uma limpeza de rótulos por validação cruzada (`clean_folds`) não melhoraram o resultado.
 
 A linha de base com EasyOCR pré-treinado e localização heurística com OpenCV ficou em 3%. Mesmo escolhendo o texto certo, o EasyOCR só via a leitura em cerca de 10% das fotos, por causa dos dígitos de 7 segmentos e da resolução baixa.
+
+## Painel VoltLens (front-end + Supabase)
+
+Painel web para validar as leituras do OCR, com login, fotos num bucket do Supabase e
+decisões gravadas no banco.
+
+```text
+frontend/                 app React (Vite + TypeScript) que roda no navegador
+supabase/migrations/      tabelas, regras de acesso (RLS) e bucket "leituras"
+scripts/supabase_carregar.py       sobe fotos, recortes e leituras para o Supabase
+scripts/supabase_criar_usuario.py  cria a conta de quem vai usar o painel
+src/voltlens_dados.py     lê data/readings, data/sheets e o gabarito (usado também pelo protótipo HTML)
+```
+
+No banco ficam:
+
+| Tabela | O que guarda |
+|---|---|
+| `lotes` | Um lote por pasta de `data/readings/` |
+| `leituras` | Uma linha por foto: sugestão do OCR, registro do PDA, gabarito e o caminho da foto no bucket |
+| `decisoes` | Aceitar / corrigir / recusar de cada pessoa (cada um só vê as próprias) |
+| `questionarios` | As três perguntas do fim do lote |
+
+As fotos ficam no bucket privado `leituras` (Storage). O painel lê por URL assinada,
+válida por uma hora, e só para quem está logado.
+
+### Pré-requisitos
+
+- [Node.js](https://nodejs.org) 22.12 ou superior (traz o `npm` e o `npx`).
+- Para carregar fotos: o ambiente Python do projeto (seção [Instalação](#instalação)) e as fotos em `data/`.
+- Só para rodar o Supabase na própria máquina: [Docker Desktop](https://www.docker.com/products/docker-desktop/) aberto.
+
+A CLI do Supabase não precisa ser instalada: os comandos abaixo usam `npx supabase`.
+
+### Usar o painel (projeto na nuvem já carregado)
+
+É o caso de quem só vai validar fotos. Precisa da URL e da chave pública do projeto
+(peça a quem administra) e de uma conta criada para você.
+
+```bash
+git clone <url-do-repositório>
+cd braintech/frontend
+npm ci
+cp .env.example .env.local        # no Windows: copy .env.example .env.local
+```
+
+Preencha `frontend/.env.local`:
+
+```text
+VITE_SUPABASE_URL=https://<ref-do-projeto>.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=<chave publishable ou anon>
+VITE_LOGIN_DOMAIN=voltlens.local
+```
+
+Rode e abra http://localhost:5173:
+
+```bash
+npm run dev
+```
+
+Entre com o usuário e a senha que você recebeu.
+
+### Preparar o Supabase na nuvem (uma vez, por quem tem as fotos)
+
+1. Crie o projeto em https://supabase.com/dashboard ("New project"; região South America (São Paulo)).
+2. Na raiz do repositório, aplique o esquema do banco:
+
+   ```bash
+   npx --yes supabase login                                   # abre o navegador
+   npx --yes supabase link --project-ref <ref-do-projeto>     # o ref está na URL do painel
+   npx --yes supabase db push --remote                        # pede a senha do banco
+   ```
+
+   Rode um comando por vez. O `--remote` é necessário quando o Supabase local também está
+   rodando na máquina: sem ele, a CLI aplica a migração no banco local.
+
+3. Desligue o cadastro aberto: no painel, **Authentication > Sign In / Providers**, desmarque
+   **Allow new users to sign up**. As contas são criadas pelo script do passo 5.
+4. Copie `.env.example` para `.env` (na raiz) e preencha `SUPABASE_URL` e `SUPABASE_SECRET_KEY`
+   (em **Project Settings > API Keys**). A chave secreta ignora as regras de acesso: só nos scripts, nunca no git.
+5. Suba as fotos e crie as contas:
+
+   ```bash
+   python scripts/supabase_carregar.py                          # só as fotos de teste (data/imgs_raw_test)
+   python scripts/supabase_criar_usuario.py maria "senha-da-maria"
+   ```
+
+   Para mandar também os lotes PSP: `--lotes PSP_EXTRATLEITIMPL_030726_0121` (um ou mais) ou
+   `--lotes todos`, de preferência com `--amostra 150` (fotos por lote) para caber no plano gratuito (1 GB).
+   O script pode ser rodado de novo: imagens já enviadas são puladas e as linhas são atualizadas.
+
+### Rodar tudo na própria máquina (Supabase local, com Docker)
+
+Bom para testar sem mexer na nuvem. Com o Docker Desktop aberto, na raiz do repositório:
+
+```bash
+npx supabase start          # na primeira vez baixa as imagens (alguns minutos) e aplica a migração
+npx supabase status         # mostra a URL e as chaves locais
+```
+
+Use os valores do `status` nos dois arquivos:
+
+- `.env` (raiz): `SUPABASE_URL` = API URL, `SUPABASE_SECRET_KEY` = Secret (ou service_role key).
+- `frontend/.env.local`: `VITE_SUPABASE_URL` = API URL, `VITE_SUPABASE_PUBLISHABLE_KEY` = Publishable (ou anon key).
+
+Depois os mesmos passos da nuvem: `python scripts/supabase_carregar.py`,
+`python scripts/supabase_criar_usuario.py ...`, e `npm run dev` dentro de `frontend/`.
+
+Para desligar: `npx supabase stop`. Para apagar o banco local e recomeçar: `npx supabase db reset`
+(depois carregue as fotos de novo).
+
+### Ver os dados no navegador
+
+- **Local:** Supabase Studio em http://127.0.0.1:54323.
+- **Nuvem:** https://supabase.com/dashboard, no projeto.
+
+No **Table Editor** estão `lotes`, `leituras`, `decisoes` e `questionarios`; em **Storage**, o bucket
+`leituras` com `<lote>/fotos/` e `<lote>/recortes/`; em **Authentication > Users**, as contas.
+Para tirar as decisões de todos em CSV: Table Editor > `decisoes` > Export.
+
+### Diferenças em relação ao protótipo HTML
+
+- Login de verdade: só entra quem tem conta (as fotos são do cliente). A tela continua pedindo
+  "Usuário" e "Senha"; por trás, `maria` vira o e-mail `maria@voltlens.local`.
+- As decisões e o questionário ficam no banco: a mesma pessoa vê o progresso em qualquer computador.
+- O resto (filas, filtros, ações em massa, atalhos `A`/`C`/`R`/setas/`F`, resumo e CSV) é o mesmo.
 
 ## Verificação rápida
 

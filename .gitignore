@@ -28,3 +28,17 @@ models/checkpoints/display/*.pt
 
 # Split e predições do reconhecedor trazem leituras e códigos de instalação das planilhas do cliente
 models/checkpoints/recognizer/*.csv
+
+# Ferramentas locais de conferência que não fazem parte da demonstração (protótipo HTML e visualizador do OCR)
+utils/build_voltlens_prototype.py
+utils/voltlens_prototype_template.html
+utils/voltlens_assets/
+utils/build_ocr_viewer.py
+utils/ocr_viewer_template.html
+
+# Chaves do Supabase (scripts Python e front-end)
+.env
+.env.local
+.env.*.local
+!.env.example
+
