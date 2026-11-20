@@ -86,7 +86,10 @@ teste do Supabase, processá-las com os modelos já treinados, publicar o result
 validar as leituras no painel web. Leva uns 20 minutos na primeira vez (a maior parte é a instalação) e 1 a 3 minutos de processamento.
 
 ```text
-Supabase Storage: leituras/imgs_raw_test/fotos/  (18 fotos do WhatsApp, enviadas uma vez)
+data/imgs_raw_test (18 fotos do WhatsApp, no git)
+   │  envio                           scripts/supabase_enviar_fotos.py
+   ▼
+Supabase Storage: leituras/imgs_raw_test/fotos/
    │  0. download                     scripts/ponta_a_ponta.py     -> data/entrada/imgs_raw_test
    │  1. pré-processamento            pipelines/preprocessing_images.py
    │  2. recorte do display           pipelines/crop_detector.py   (detector de display)
@@ -96,7 +99,7 @@ Supabase Storage: leituras/imgs_raw_test/fotos/  (18 fotos do WhatsApp, enviadas
 Supabase (fotos + recortes + leituras)  ──►  painel web (frontend/)  ──►  login e validação
 ```
 
-As etapas 0 a 4 rodam com um comando só (passo 4 abaixo). O painel mostra cada foto direto do
+O envio é o passo 4 abaixo; as etapas 0 a 4 rodam com um comando só (passo 5). O painel mostra cada foto direto do
 Supabase, ao lado do recorte e da leitura que o processamento gerou.
 
 ### O que precisa
@@ -105,14 +108,14 @@ Supabase, ao lado do recorte e da leitura que o processamento gerou.
   "Add python.exe to PATH" na instalação.
 - [Node.js](https://nodejs.org) 22.12 ou superior (testado com 24.19; o Vite exige 20.19+ ou 22.12+).
 - git.
-- GPU não é necessária: o processamento roda na CPU de propósito (veja o passo 4).
+- GPU não é necessária: o processamento roda na CPU de propósito (veja o passo 5).
 - ~4 GB livres em disco: o PyTorch de `requirements.txt` vem com CUDA, mesmo em máquina sem GPU.
 - O detector de display (`best.pt`, ~173 MB), que não cabe no git: baixe no Drive (passo 2).
 - As chaves do projeto Supabase (passo 3). O projeto da demonstração é o `gylsrbkagqjfuipmteca`.
 
 O resto vem com o `git clone`: código, reconhecedor (`models/checkpoints/recognizer/best.pt`),
-a migração do banco e uma cópia de segurança das fotos de teste em `data/imgs_raw_test/` (o
-processamento usa as do Supabase; a cópia do git serve para reenviá-las, se for preciso).
+a migração do banco e as 18 fotos de teste em `data/imgs_raw_test/`, que o passo 4 envia para o
+Supabase (o processamento usa as do Supabase).
 
 ### Passo a passo
 
@@ -148,17 +151,17 @@ processamento usa as do Supabase; a cópia do git serve para reenviá-las, se fo
    `npx supabase projects api-keys --project-ref gylsrbkagqjfuipmteca --reveal`.
    A chave secreta dá acesso total: não a mande por chat nem a coloque no git.
 
-4. **Baixar, processar e publicar** (etapas 0 a 4 do diagrama):
-
-   ```bash
-   python scripts/ponta_a_ponta.py
-   ```
-
-   As fotos de teste já estão no Supabase do projeto `gylsrbkagqjfuipmteca`. Num projeto novo, ou
-   se o script avisar que não achou fotos no Supabase, envie-as uma vez (fotos já enviadas são puladas):
+4. **Enviar as fotos para o Supabase** (as 18 fotos de `data/imgs_raw_test` vão para o bucket
+   `leituras`, em `imgs_raw_test/fotos/`; fotos já enviadas são puladas):
 
    ```bash
    python scripts/supabase_enviar_fotos.py
+   ```
+
+5. **Baixar, processar e publicar** (etapas 0 a 4 do diagrama):
+
+   ```bash
+   python scripts/ponta_a_ponta.py
    ```
 
    O script confere antes se o detector e as chaves estão no lugar e diz o que falta. Ele apaga
@@ -177,13 +180,13 @@ processamento usa as do Supabase; a cópia do git serve para reenviá-las, se fo
    No painel, isso aparece como 11 displays recortados e 7 fotos sem leitura (o detector não
    achou o display).
 
-5. **Criar a conta** de quem vai entrar no painel:
+6. **Criar a conta** de quem vai entrar no painel:
 
    ```bash
    python scripts/supabase_criar_usuario.py maria "uma-senha"
    ```
 
-6. **Abrir o painel**:
+7. **Abrir o painel**:
 
    ```bash
    cd frontend
@@ -191,22 +194,20 @@ processamento usa as do Supabase; a cópia do git serve para reenviá-las, se fo
    npm run dev
    ```
 
-   O `npm ci` instala exatamente as versões do `package-lock.json`. Abra http://localhost:5173, entre com o usuário e a senha do passo 5 e valide as leituras.
+   O `npm ci` instala exatamente as versões do `package-lock.json`. Abra http://localhost:5173, entre com o usuário e a senha do passo 6 e valide as leituras.
    Para ver os dados por dentro: https://supabase.com/dashboard/project/gylsrbkagqjfuipmteca
    (Table Editor e Storage).
 
 ### Recomeçar do zero
 
-Para ensaiar de novo, apague do Supabase o resultado do processamento (recortes, leituras,
-decisões) e as contas, e volte ao passo 4. As fotos de entrada continuam no Supabase, assim como
-as tabelas:
+Para deixar o Supabase como antes da demonstração (só as tabelas e o bucket vazio), apague as
+fotos, os recortes, as linhas e as contas, e volte ao passo 4:
 
 ```bash
-python scripts/supabase_limpar.py --contas
+python scripts/supabase_limpar.py --contas --fotos
 ```
 
-Para apagar também as fotos de entrada, use `--fotos` (depois, reenvie com
-`python scripts/supabase_enviar_fotos.py`).
+Sem `--fotos`, as fotos de entrada ficam no Supabase e dá para voltar direto ao passo 5.
 
 ### Projeto Supabase novo
 
@@ -786,7 +787,7 @@ Entre com o usuário e a senha que você recebeu.
    rodando na máquina: sem ele, a CLI aplica a migração no banco local.
 
 3. Desligue o cadastro aberto: no painel, **Authentication > Sign In / Providers**, desmarque
-   **Allow new users to sign up**. As contas são criadas pelo script do passo 5.
+   **Allow new users to sign up**. As contas são criadas pelo script do passo 6.
 4. Copie `.env.example` para `.env` (na raiz) e preencha `SUPABASE_URL` e `SUPABASE_SECRET_KEY`
    (em **Project Settings > API Keys**). A chave secreta ignora as regras de acesso: só nos scripts, nunca no git.
 5. Envie as fotos, processe e crie as contas:
