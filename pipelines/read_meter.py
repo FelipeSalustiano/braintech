@@ -24,6 +24,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from models.recognizer import load_display, load_recognizer, recognize
 from src.meter_reading import STATUS_SEM_LEITURA, reading_status
+from src.device import add_device_argument, resolve_device
 
 DEFAULTS = {
     "input": "data/display_crops",
@@ -42,6 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, help="Pasta de saída das leituras")
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--accept-confidence", type=float, help="Confiança mínima para o status 'lido'")
+    add_device_argument(parser)
     return parser.parse_args()
 
 
@@ -66,7 +68,7 @@ def main() -> None:
     with manifest_path.open(encoding="utf-8") as manifest_file:
         manifest = list(csv.DictReader(manifest_file))
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(args.device)
     model = load_recognizer(checkpoint_path, device)
     cropped = [row for row in manifest if row["crop_path"]]
     predictions = recognize(model, [load_display(Path(row["crop_path"])) for row in cropped], device)

@@ -36,6 +36,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from models.recognizer import NUM_DIGITS, DisplayDataset, MeterReader, collate, decode, load_display, train_transform
 from pipelines.evaluate_ocr import load_ground_truth, photo_key
 from src.meter_reading import same_reading
+from src.device import add_device_argument, resolve_device
 
 DEFAULTS = {
     "crops_root": "data/display_crops",
@@ -287,6 +288,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=Path("configs/detector.json"))
     parser.add_argument("--epochs", type=int)
     parser.add_argument("--log-file", type=Path, default=Path("logs/recognizer.log"))
+    add_device_argument(parser)
     return parser.parse_args()
 
 
@@ -307,7 +309,7 @@ def main() -> None:
     )
     random.seed(settings["seed"])
     torch.manual_seed(settings["seed"])
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(args.device)
     output_dir = Path(settings["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
 

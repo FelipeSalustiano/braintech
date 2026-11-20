@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from models.model import MeterNetwork
+from src.device import add_device_argument, resolve_device
 
 MODEL_IMAGE_SIZE = (360, 480)
 
@@ -75,6 +76,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", type=Path, help="Override input from config")
     parser.add_argument("--output", type=Path, help="Override output from config")
     parser.add_argument("--threshold", type=float, default=None)
+    add_device_argument(parser)
     return parser.parse_args()
 
 
@@ -94,7 +96,7 @@ def main() -> None:
     if not input_path.exists():
         raise FileNotFoundError(f"Input not found: {input_path}")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(args.device)
     model = MeterNetwork().to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
     model.load_state_dict(checkpoint["model_state_dict"])

@@ -21,6 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from models.detector import CLASS_NAMES, list_images, load_detector, predict_paths, pseudo_label_status
+from src.device import add_device_argument, resolve_device
 from pipelines.train_semi_supervised import DEFAULTS
 
 STATUS_COLORS = {"aceito": "lime", "revisar": "orange"}
@@ -89,6 +90,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, help="Padrão: pseudo_labels_dir do config")
     parser.add_argument("--accept-threshold", type=float)
     parser.add_argument("--preview-dir", type=Path, help="Salva as imagens com as caixas desenhadas")
+    add_device_argument(parser)
     return parser.parse_args()
 
 
@@ -108,7 +110,7 @@ def main() -> None:
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint}")
     output.mkdir(parents=True, exist_ok=True)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(args.device)
     model = load_detector(checkpoint, device)
 
     for folder in folders:

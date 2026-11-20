@@ -20,6 +20,7 @@ from src.meter_cropping import (
     compute_crop_box,
     crop_image,
 )
+from src.device import add_device_argument, resolve_device
 
 DEFAULT_CHECKPOINT = "models/checkpoints/semi_supervised/best.pt"
 MANIFEST_FIELDS = [
@@ -111,6 +112,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--margin", type=float)
     parser.add_argument("--min-size", type=int, help="Menor lado aceito do recorte, em pixels (displays são pequenos)")
     parser.add_argument("--no-tta", action="store_true", help="Disable the horizontal-flip test-time augmentation")
+    add_device_argument(parser)
     return parser.parse_args()
 
 
@@ -140,7 +142,7 @@ def main() -> None:
     if not input_path.exists():
         raise FileNotFoundError(f"Input not found: {input_path}")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(args.device)
     model = load_detector(checkpoint_path, device)
 
     images = [input_path] if input_path.is_file() else list_images(input_path)

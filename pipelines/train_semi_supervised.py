@@ -35,6 +35,7 @@ from models.detector import (
     pseudo_label_status,
     train_transform,
 )
+from src.device import add_device_argument, resolve_device
 from utils.detection_metrics import evaluate
 
 DEFAULTS = {
@@ -219,6 +220,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--num-workers", type=int)
     parser.add_argument("--unlabeled-limit", type=int, help="Usa só N imagens sem rótulo (teste rápido)")
+    add_device_argument(parser)
     return parser.parse_args()
 
 
@@ -240,7 +242,7 @@ def main() -> None:
         handlers=[logging.StreamHandler(), logging.FileHandler(log_file, encoding="utf-8")],
     )
     set_seed(settings["seed"])
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(args.device)
     output_dir = Path(settings["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
 

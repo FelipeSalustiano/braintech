@@ -92,9 +92,7 @@ def baixar_fotos(sb: Supabase) -> None:
 def etapa(numero: int, titulo: str, comando: list[str]) -> None:
     inicio = titulo_etapa(numero, titulo)
     print("$ python " + " ".join(f'"{c}"' if " " in c else c for c in comando))
-    # Esconde a GPU dos pipelines para o resultado não depender da máquina (ver docstring).
-    env = {**os.environ, "CUDA_VISIBLE_DEVICES": "-1"}
-    resultado = subprocess.run([sys.executable, *comando], cwd=PROJECT_ROOT, env=env)
+    resultado = subprocess.run([sys.executable, *comando], cwd=PROJECT_ROOT)
     if resultado.returncode != 0:
         raise SystemExit(f"\nA etapa {numero} falhou (código {resultado.returncode}). Veja a mensagem acima.")
     print(f"--- etapa {numero} concluída em {time.perf_counter() - inicio:.1f} s")
@@ -139,9 +137,10 @@ def main() -> None:
     etapa(2, "Recorte do display (detector)", [
         "pipelines/crop_detector.py", "--checkpoint", str(DETECTOR_DISPLAY), "--input", str(PRE),
         "--crop-source", str(ENTRADA), "--output", str(RECORTES),
-        "--threshold", "0.5", "--margin", "0.15", "--min-size", "8"])
+        "--threshold", "0.5", "--margin", "0.15", "--min-size", "8", "--device", "cpu"])
     etapa(3, "Leitura do display (OCR)", [
-        "pipelines/read_meter.py", "--input", str(RECORTES), "--output", str(LEITURAS)])
+        "pipelines/read_meter.py", "--input", str(RECORTES), "--output", str(LEITURAS),
+        "--device", "cpu"])
     conferir()
     if not args.sem_publicar:
         etapa(4, "Publicação no Supabase", ["scripts/supabase_carregar.py", "--lotes", LOTE])
