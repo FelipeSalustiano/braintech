@@ -1,32 +1,36 @@
-# Detector de Medidores
+# VoltLens: leitura de medidores por foto
 
-Projeto de visão computacional para localizar medidores em fotografias usando detecção de objetos supervisionada. O treinamento usa imagens anotadas no formato COCO e a inferência produz uma cópia da imagem com a bounding box desenhada.
+Projeto de visão computacional que lê o valor de medidores de energia a partir das fotos tiradas pelos leituristas. Um detector (Faster R-CNN) localiza o display do medidor, um reconhecedor (CNN + BiLSTM) lê os dígitos no recorte e cada leitura recebe um status pela confiança. As leituras vão para o Supabase e são validadas por pessoas num painel web.
 
 ## Fluxo geral
 
 ```text
-Imagens COCO anotadas + JSON de anotações
-                    |
-                    v
-             Treinamento da CNN
-                    |
-                    v
-       models/checkpoints/meter_detector.pt
-                    |
-                    v
-       Imagens novas sem anotação COCO
-                    |
-                    v
-              Pré-processamento
-                    |
-                    v
-              Predição da caixa
-                    |
-                    v
-       Imagens com bounding box desenhada
+TREINO (uma vez, com as fotos históricas e as planilhas dos leituristas)
+
+data/raw_images ──► pré-processamento ──► anotação COCO no CVAT (Medidor, Display)
+                                              │
+            ┌─────────────────────────────────┼──────────────────────────────┐
+            ▼                                 ▼                              ▼
+  train_detector.py              train_semi_supervised.py         train_semi_supervised.py
+  (MeterNetwork, antigo)         (medidor, professor-aluno)       --section display_detector
+            │                                 │                              │
+  meter_detector.pt           semi_supervised/best.pt ──►          display/best.pt
+                              pseudo_label.py (rotula lotes)                 │
+                                                                 crop_detector.py (recortes)
+                                                                             │
+                                  data/sheets (leitura do CSV) ──► train_recognizer.py
+                                  data/review (conferência manual) ─┘        │
+                                                                   recognizer/best.pt
+
+USO (fotos novas, scripts/ponta_a_ponta.py)
+
+fotos no Supabase ─► pré-processamento ─► recorte do display ─► leitura (OCR) ─► status
+                                                                                    │
+                       painel web (frontend/) ◄── Supabase (fotos, recortes, leituras)
+                       aceitar / corrigir / recusar ──► tabela decisoes
 ```
 
-O projeto detecta o medidor e o display e lê o valor do display com um reconhecedor treinado (veja [Leitura do display (OCR)](#leitura-do-display-ocr)). As leituras vão para um painel web de validação (veja [Painel VoltLens](#painel-voltlens-front-end--supabase)).
+Detalhes de cada parte: [Rotulagem semi-supervisionada](#rotulagem-semi-supervisionada), [Leitura do display (OCR)](#leitura-do-display-ocr) e [Painel VoltLens](#painel-voltlens-front-end--supabase). As seções sobre o detector antigo (`MeterNetwork`, `train_detector.py`, `predict_detector.py`) continuam valendo, mas esse modelo foi substituído pelo Faster R-CNN.
 
 **Para rodar tudo numa máquina nova, do processamento ao login no painel, siga [Demonstração de ponta a ponta](#demonstração-de-ponta-a-ponta-do-processamento-ao-login).**
 
@@ -78,6 +82,12 @@ PY
 ```
 
 Se você não ativar o ambiente virtual, use diretamente `.venv/bin/python` nos comandos deste README.
+
+### CPU ou GPU
+
+Os pipelines que usam PyTorch (`train_*`, `predict_detector.py`, `pseudo_label.py`, `crop_detector.py` e `read_meter.py`) aceitam `--device auto|cpu|cuda`. O padrão `auto` usa a GPU quando ela existe. Use `--device cpu` para ter o mesmo resultado em qualquer máquina; é o que o `scripts/ponta_a_ponta.py` faz.
+
+Não esconda a GPU com `CUDA_VISIBLE_DEVICES=-1`: com torch 2.14 + CUDA 13 no Windows, o processo cai (access violation, código 3221225477) quando nenhuma GPU está visível.
 
 ## Demonstração de ponta a ponta (do processamento ao login)
 
@@ -220,39 +230,64 @@ tabelas e desligue o cadastro aberto, como em [Preparar o Supabase na nuvem](#pr
 braintech/
 ├── configs/
 │   └── detector.json
-├── data/
-│   ├── annotations/
-│   ├── raw_images/
-│   ├── preprocessed_images/
-│   ├── predictions_preprocessed/
-│   ├── sheets/
-│   ├── imgs_raw_test/
-│   ├── imgs_preprocessed_test/
-│   └── imgs_prediction_test/
+├── data/                          (fora do git, exceto imgs_raw_test/)
+│   ├── annotations/               COCO do CVAT; pseudo/ com os pseudo-rótulos
+│   ├── raw_images/                fotos históricas originais, um lote por pasta
+│   ├── preprocessed_images/       fotos históricas pré-processadas
+│   ├── sheets/                    CSVs dos leituristas (leitura e PDA)
+│   ├── display_crops/             recortes de display por lote (+ manifest.csv)
+│   ├── readings/                  readings.csv por lote
+│   ├── review/                    páginas e CSVs da conferência manual
+│   ├── imgs_raw_test/             18 fotos de teste (no git)
+│   ├── entrada/                   fotos de teste baixadas do Supabase
+│   ├── imgs_preprocessed_test/    fotos de teste pré-processadas
+│   └── crops_display_test/        recortes das fotos de teste
 ├── documents/
 ├── models/
 │   ├── checkpoints/
-│   │   ├── meter_detector.pt
-│   │   └── semi_supervised/
-│   │       └── best.pt        (baixar do Drive, ver "Baixar o modelo treinado")
-│   ├── dataset.py
-│   ├── detector.py
-│   └── model.py
+│   │   ├── meter_detector.pt      detector antigo (MeterNetwork)
+│   │   ├── semi_supervised/       detector de medidor; best.pt baixado do Drive
+│   │   ├── display/               detector de display; best.pt baixado do Drive
+│   │   └── recognizer/            reconhecedor; best.pt no git
+│   ├── dataset.py                 dataset COCO do detector antigo
+│   ├── model.py                   MeterNetwork
+│   ├── detector.py                Faster R-CNN: construção, carga, dataset e predição
+│   └── recognizer.py              reconhecedor CNN + BiLSTM
 ├── notebooks/
 │   ├── arquitetura.ipynb
 │   └── eda.ipynb
 ├── pipelines/
-│   ├── preprocessing_images.py
-│   ├── predict_detector.py
-│   └── train_detector.py
+│   ├── preprocessing_images.py    pré-processamento
+│   ├── train_detector.py          treino do detector antigo
+│   ├── predict_detector.py        predição do detector antigo
+│   ├── train_semi_supervised.py   treino professor-aluno (medidor ou display)
+│   ├── pseudo_label.py            rotulagem dos lotes sem anotação
+│   ├── crop_detector.py           recorte do medidor ou do display
+│   ├── train_recognizer.py        treino do reconhecedor
+│   ├── read_meter.py              leitura dos recortes
+│   └── evaluate_ocr.py            leituras contra os CSVs
 ├── src/
-│   └── image_preprocessing.py
+│   ├── device.py                  opção --device dos pipelines
+│   ├── image_preprocessing.py     análise e filtros de imagem
+│   ├── meter_cropping.py          regras do recorte a partir da caixa
+│   ├── meter_reading.py           status da leitura pela confiança
+│   └── voltlens_dados.py          leituras, PDA e gabarito para o Supabase
 ├── utils/
+│   ├── build_review_page.py       página de conferência manual
+│   ├── score_review.py            acurácia a partir da conferência
+│   ├── detection_metrics.py       AP no estilo COCO e IoU
+│   ├── draw_crop_boxes.py         desenha as caixas de recorte para conferir
 │   ├── image_convert.py
 │   └── split_dataset.py
-├── frontend/              (painel web, ver "Painel VoltLens")
-├── scripts/               (demonstração de ponta a ponta e Supabase)
-├── supabase/              (migrações do banco)
+├── frontend/                      painel web (ver "Painel VoltLens")
+├── scripts/
+│   ├── ponta_a_ponta.py           baixa, processa e publica (demonstração)
+│   ├── supabase_api.py            cliente REST mínimo do Supabase
+│   ├── supabase_enviar_fotos.py   envia as fotos de entrada
+│   ├── supabase_carregar.py       publica recortes e leituras
+│   ├── supabase_criar_usuario.py  cria contas do painel
+│   └── supabase_limpar.py         apaga resultados, contas e fotos
+├── supabase/                      config e migração do banco
 ├── Dockerfile
 ├── README.md
 ├── requirements.txt
@@ -263,27 +298,31 @@ braintech/
 
 | Pasta | Responsabilidade |
 |---|---|
-| `configs/` | Configurações de treinamento e predição em JSON |
-| `data/` | Imagens, anotações COCO, planilhas e resultados gerados |
+| `configs/` | Parâmetros de treino, recorte e leitura em JSON |
+| `data/` | Fotos, anotações COCO, planilhas, recortes, leituras e conferências |
 | `documents/` | Documentos de apoio e análises do projeto |
-| `models/` | Dataset PyTorch, arquitetura da rede e checkpoints |
+| `models/` | Arquiteturas (detectores e reconhecedor) e checkpoints |
 | `notebooks/` | EDA, testes exploratórios e desenvolvimento da arquitetura |
-| `pipelines/` | Scripts executáveis de pré-processamento, treino e predição |
-| `src/` | Regras centrais de análise e filtragem de imagens |
-| `utils/` | Conversões de imagem e utilitários auxiliares |
+| `pipelines/` | Scripts executáveis de pré-processamento, treino, recorte e leitura |
+| `src/` | Regras centrais: imagem, recorte, status da leitura, device e dados do painel |
+| `utils/` | Conferência manual, métricas e utilitários auxiliares |
+| `scripts/` | Demonstração de ponta a ponta e integração com o Supabase |
+| `frontend/` | Painel web de validação (React + Vite + TypeScript) |
+| `supabase/` | Tabelas, regras de acesso (RLS) e bucket |
 
 ### Organização dos dados
 
 Dentro de `data/`:
 
-- `annotations/`: arquivos JSON no formato COCO usados como rótulos do treinamento.
-- `raw_images/`: imagens históricas originais.
-- `preprocessed_images/`: imagens históricas tratadas usadas pelo treinamento.
-- `predictions_preprocessed/`: resultados de predições históricas.
-- `sheets/`: CSVs com leituras e informações dos medidores.
-- `imgs_raw_test/`: imagens novas sem anotação.
-- `imgs_preprocessed_test/`: imagens novas após o pré-processamento.
-- `imgs_prediction_test/`: imagens novas com as bounding boxes desenhadas.
+- `annotations/`: JSONs COCO exportados do CVAT (medidor e `instances_default.json` do display); `pseudo/` recebe os pseudo-rótulos.
+- `raw_images/`: fotos históricas originais, um lote `PSP_EXTRATLEITIMPL_*` por pasta.
+- `preprocessed_images/`: as mesmas fotos pré-processadas, usadas no treino e na detecção.
+- `sheets/`: CSVs dos leituristas, com a leitura digitada e o registro do PDA.
+- `display_crops/<lote>/`: recortes de display e `manifest.csv`.
+- `readings/<lote>/`: `readings.csv` com leitura, confiança e status.
+- `review/`: páginas e CSVs da conferência manual.
+- `imgs_raw_test/`: 18 fotos de teste, a única pasta de dados no git.
+- `entrada/`, `imgs_preprocessed_test/`, `crops_display_test/`: saídas da demonstração de ponta a ponta.
 
 O JSON COCO deve conter `images`, `annotations` e `categories`. Cada anotação usa uma bounding box no formato `[x, y, largura, altura]`.
 
@@ -303,7 +342,19 @@ As imagens usadas no treinamento precisam existir na pasta indicada pelo dataset
 
 ## Configuração central
 
-O arquivo [configs/detector.json](configs/detector.json) concentra os parâmetros da predição e do treinamento:
+O arquivo [configs/detector.json](configs/detector.json) concentra os parâmetros de todos os pipelines, uma seção por etapa:
+
+| Seção | Usada por | O que controla |
+|---|---|---|
+| raiz (`checkpoint`, `input`, `output`, `threshold`) | `predict_detector.py` | predição do detector antigo |
+| `training` | `train_detector.py` | treino do detector antigo |
+| `semi_supervised` | `train_semi_supervised.py`, `pseudo_label.py` | detector de medidor (Faster R-CNN) |
+| `display_detector` | `train_semi_supervised.py --section display_detector` | detector de display |
+| `cropping` | `crop_detector.py` | recorte (padrão: medidor com `semi_supervised/best.pt`, limiar 0,8) |
+| `recognizer` | `train_recognizer.py` | treino do reconhecedor |
+| `reading` | `read_meter.py` | leitura e limites de status (`accept_confidence`, `max_illegible_prob`) |
+
+Os argumentos de linha de comando substituem os valores do JSON. As seções do detector antigo:
 
 ```json
 {
@@ -618,7 +669,7 @@ fotos pré-processadas --crop_detector.py (detector de display)--> data/display_
 ### Modelos treinados
 
 - **Reconhecedor** (`models/checkpoints/recognizer/best.pt`, ~25 MB): está no git.
-- **Detector de display** (`models/checkpoints/display/best.pt`, ~166 MB): não fica no git, porque passa do limite de 100 MB por arquivo do GitHub. Peça o arquivo a quem treinou e coloque-o em `models/checkpoints/display/best.pt`. Os `round_N.pt` da mesma pasta são intermediários e não precisam ser copiados.
+- **Detector de display** (`models/checkpoints/display/best.pt`, ~173 MB): não fica no git, porque passa do limite de 100 MB por arquivo do GitHub. Baixe-o pelo link do passo 2 da [Demonstração de ponta a ponta](#demonstração-de-ponta-a-ponta-do-processamento-ao-login) e coloque-o em `models/checkpoints/display/best.pt`. Os `round_N.pt` da mesma pasta são intermediários e não precisam ser copiados.
 
 Sem o detector de display dá para treinar o reconhecedor e rodar o `read_meter.py` em recortes já existentes, mas não dá para gerar recortes de fotos novas.
 
@@ -922,7 +973,7 @@ O modelo aprende o formato das bounding boxes COCO. Se as caixas anotadas cobrem
 Execute os comandos a partir da raiz do projeto:
 
 ```bash
-cd /home/hcdebarros/cesar/mlops/braintech
+cd braintech        # a pasta onde o repositório foi clonado
 ```
 
 Os scripts também configuram a raiz do projeto no `sys.path` quando executados diretamente.
@@ -941,13 +992,24 @@ Os scripts também configuram a raiz do projeto no `sys.path` quando executados 
 - `pipelines/read_meter.py`: leitura dos recortes de display.
 - `pipelines/evaluate_ocr.py`: acurácia das leituras contra os CSVs dos leituristas.
 - `utils/build_review_page.py` e `utils/score_review.py`: conferência manual de uma amostra.
+- `models/detector.py`: Faster R-CNN ResNet50-FPN v2 (medidor e display): construção, carga, dataset COCO e predição com TTA.
+- `pipelines/train_semi_supervised.py` e `pipelines/pseudo_label.py`: treino professor-aluno e rotulagem dos lotes sem anotação.
+- `pipelines/crop_detector.py` e `src/meter_cropping.py`: recorte do medidor ou do display a partir da caixa detectada.
+- `utils/detection_metrics.py`: AP50, AP50:95 e IoU médio usados na validação do detector.
+- `utils/draw_crop_boxes.py`: desenha as caixas do `manifest.csv` para conferência visual.
+- `src/device.py`: opção `--device` comum aos pipelines.
+- `src/voltlens_dados.py` e `scripts/supabase_*.py`: dados do painel e integração com o Supabase.
+- `scripts/ponta_a_ponta.py`: demonstração de ponta a ponta.
+- `frontend/src/screens/`: telas do painel (login, lotes, fila, detalhe, resumo).
 - `utils/image_convert.py`: conversão de imagens para matrizes e tensores.
-- `configs/detector.json`: configuração de treinamento e inferência.
+- `configs/detector.json`: configuração de todos os pipelines.
 
 ## Limitações atuais
 
-- O reconhecedor acerta 36% contra o CSV no teste (84% nas leituras com confiança ≥ 0,9, que são 28% das fotos); a acurácia real em fotos legíveis ainda precisa da conferência manual.
-- A implementação escolhe a célula de maior confiança na predição.
-- Não há cálculo de IoU, mAP, precision ou recall no pipeline.
-- A qualidade final depende diretamente da qualidade das bounding boxes COCO.
-- O script de treino usa atualmente um arquivo de anotação e uma pasta de imagens padrão.
+- O reconhecedor acerta 35% contra o CSV no conjunto de teste. Com confiança ≥ 0,9, cobre 15% das fotos com 87% de acerto contra o CSV (97% na conferência manual). A acurácia real nas fotos legíveis depende da conferência manual.
+- A qualidade da foto é o maior limitador: na conferência do treino, 47% das fotos eram ilegíveis.
+- O CSV dos leituristas tem erros (16% das fotos legíveis conferidas), então serve de rótulo ruidoso.
+- O detector de display não acha o display em parte das fotos (7 das 18 fotos de teste saem `sem_leitura`).
+- Na GPU, o detector usa float16 e as fotos de confiança baixa podem mudar de leitura; para resultado reproduzível, use `--device cpu`.
+- O detector antigo (`MeterNetwork`) escolhe só a célula de maior confiança e não tem métricas de IoU ou mAP; o Faster R-CNN tem (`utils/detection_metrics.py`).
+- `train_detector.py` usa um arquivo de anotação e uma pasta de imagens fixos nos argumentos padrão.
