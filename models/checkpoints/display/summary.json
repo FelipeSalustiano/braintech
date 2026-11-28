@@ -1,0 +1,57 @@
+{
+  "best_round": 0,
+  "settings": {
+    "annotations": "data/annotations/instances_default.json",
+    "labeled_images": "data/preprocessed_images/PSP_EXTRATLEITIMPL_030726_0121_preprocessed",
+    "unlabeled_images": [
+      "data/preprocessed_images/PSP_EXTRATLEITIMPL_200526_0352_preprocessed",
+      "data/preprocessed_images/PSP_EXTRATLEITIMPL_210526_0335_preprocessed",
+      "data/preprocessed_images/PSP_EXTRATLEITIMPL_220526_0408_preprocessed"
+    ],
+    "output_dir": "models/checkpoints/display",
+    "rounds": 2,
+    "teacher_epochs": 20,
+    "student_epochs": 12,
+    "batch_size": 8,
+    "learning_rate": 0.01,
+    "accept_threshold": 0.8,
+    "negative_threshold": 0.05,
+    "labeled_fraction": 0.5,
+    "validation_ratio": 0.2,
+    "seed": 42,
+    "num_workers": 4,
+    "class_name": "Display",
+    "max_image_id": 432
+  },
+  "history": [
+    {
+      "round": 0,
+      "epoch": 4,
+      "metrics": {
+        "ap50": 0.9722185829325787,
+        "ap50_95": 0.6808922304563552,
+        "mean_iou_top1": 0.8344008653936251,
+        "precision_at_threshold": 0.9852941176470589,
+        "recall_at_threshold": 0.9436619718309859,
+        "false_alarm_rate_negatives": 0.13333333333333333
+      }
+    },
+    {
+      "round": 1,
+      "epoch": 12,
+      "metrics": {
+        "ap50": 0.9747441929322294,
+        "ap50_95": 0.6789627252719328,
+        "mean_iou_top1": 0.8361697448811061,
+        "precision_at_threshold": 0.971830985915493,
+        "recall_at_threshold": 0.971830985915493,
+        "false_alarm_rate_negatives": 0.26666666666666666
+      },
+      "pseudo_labels": {
+        "aceito": 5057,
+        "negativo": 635,
+        "revisar": 3656
+      }
+    }
+  ]
+}

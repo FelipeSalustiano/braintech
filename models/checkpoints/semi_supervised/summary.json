@@ -1,0 +1,73 @@
+{
+  "best_round": 2,
+  "settings": {
+    "annotations": "data/annotations/PSP_EXTRATLEITIMPL_030726_0121_instances.json",
+    "labeled_images": "data/preprocessed_images/PSP_EXTRATLEITIMPL_030726_0121_preprocessed",
+    "unlabeled_images": [
+      "data/preprocessed_images/PSP_EXTRATLEITIMPL_200526_0352_preprocessed",
+      "data/preprocessed_images/PSP_EXTRATLEITIMPL_210526_0335_preprocessed",
+      "data/preprocessed_images/PSP_EXTRATLEITIMPL_220526_0408_preprocessed"
+    ],
+    "output_dir": "models/checkpoints/semi_supervised",
+    "rounds": 2,
+    "teacher_epochs": 15,
+    "student_epochs": 12,
+    "batch_size": 8,
+    "learning_rate": 0.01,
+    "accept_threshold": 0.8,
+    "negative_threshold": 0.05,
+    "labeled_fraction": 0.5,
+    "validation_ratio": 0.2,
+    "seed": 42,
+    "num_workers": 4,
+    "pseudo_labels_dir": "data/annotations/pseudo"
+  },
+  "history": [
+    {
+      "round": 0,
+      "epoch": 4,
+      "metrics": {
+        "ap50": 0.9660673549692904,
+        "ap50_95": 0.6155969710062738,
+        "mean_iou_top1": 0.80682634401925,
+        "precision_at_threshold": 0.9723756906077348,
+        "recall_at_threshold": 0.9547920433996383,
+        "false_alarm_rate_negatives": 0.13333333333333333
+      }
+    },
+    {
+      "round": 1,
+      "epoch": 11,
+      "metrics": {
+        "ap50": 0.9722344105039555,
+        "ap50_95": 0.619612654936762,
+        "mean_iou_top1": 0.8102042630894167,
+        "precision_at_threshold": 0.9779005524861878,
+        "recall_at_threshold": 0.9602169981916817,
+        "false_alarm_rate_negatives": 0.08888888888888889
+      },
+      "pseudo_labels": {
+        "aceito": 7632,
+        "negativo": 219,
+        "revisar": 1497
+      }
+    },
+    {
+      "round": 2,
+      "epoch": 11,
+      "metrics": {
+        "ap50": 0.9726664608002085,
+        "ap50_95": 0.6245537972547377,
+        "mean_iou_top1": 0.8142528711240503,
+        "precision_at_threshold": 0.9744990892531876,
+        "recall_at_threshold": 0.9674502712477396,
+        "false_alarm_rate_negatives": 0.08888888888888889
+      },
+      "pseudo_labels": {
+        "aceito": 8328,
+        "negativo": 358,
+        "revisar": 662
+      }
+    }
+  ]
+}

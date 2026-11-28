@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from models.dataset import MeterDataset
 from models.model import MeterNetwork
+from src.device import add_device_argument, resolve_device
 
 
 def set_seed(seed: int) -> None:
@@ -105,6 +106,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int)
     parser.add_argument("--num-workers", type=int)
     parser.add_argument("--resume", action="store_true", default=None)
+    add_device_argument(parser)
     return parser.parse_args()
 
 
@@ -164,7 +166,7 @@ def main() -> None:
         pin_memory=torch.cuda.is_available(),
     )
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(args.device)
     model = MeterNetwork().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     best_validation_loss = float("inf")
